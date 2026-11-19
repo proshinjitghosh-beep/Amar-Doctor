@@ -1,4 +1,4 @@
-import { getHealthGuidance } from '../services/deepseek.service.js';
+import { getHealthGuidance } from '../services/gemini.service.js';
 import { emergencyReply, hasEmergencyRedFlag } from '../utils/triage.js';
 import { HttpError } from '../utils/http-error.js';
 

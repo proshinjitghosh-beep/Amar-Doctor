@@ -1,5 +1,12 @@
 
-import 'dotenv/config';
+if (process.env.NODE_ENV !== 'test') {
+  await import('dotenv/config');
+}
+
+function boundedInteger(value, fallback, min, max) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.min(max, Math.max(min, Math.trunc(parsed))) : fallback;
+}
 
 const requiredForProduction = ['GEMINI_API_KEY'];
 
@@ -16,6 +23,8 @@ export const env = {
 
   geminiApiKey: process.env.GEMINI_API_KEY || '',
 geminiModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+  geminiTimeoutMs: boundedInteger(process.env.GEMINI_TIMEOUT_MS, 15000, 5000, 18000),
+  geminiMaxRetries: boundedInteger(process.env.GEMINI_MAX_RETRIES, 2, 0, 2),
   databaseUrl: process.env.DATABASE_URL || '',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:3000',
 };

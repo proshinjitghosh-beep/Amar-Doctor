@@ -61,7 +61,9 @@ NODE_ENV=development
 PORT=3000
 
 GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-3.5-flash-lite
+GEMINI_MODEL=gemini-3.8-flash
+GEMINI_TIMEOUT_MS=15000
+GEMINI_MAX_RETRIES=2
 
 DATABASE_URL=postgresql://postgres:password@localhost:5432/amar_doctor
 CORS_ORIGIN=http://localhost:3000
@@ -88,7 +90,9 @@ npm start
 | Variable | Description |
 |---|---|
 | `GEMINI_API_KEY` | Google Gemini API key |
-| `GEMINI_MODEL` | Gemini model identifier |
+| `GEMINI_MODEL` | Gemini model identifier (default: `gemini-3.8-flash`) |
+| `GEMINI_TIMEOUT_MS` | Timeout per Gemini attempt in milliseconds (5,000–18,000; default: 15,000) |
+| `GEMINI_MAX_RETRIES` | Retries for transient provider/network errors (0–2; default: 2) |
 | `PORT` | Backend server port |
 | `DATABASE_URL` | PostgreSQL connection string |
 | `CORS_ORIGIN` | Allowed frontend origin |
@@ -102,6 +106,10 @@ Never commit `.env` or expose API keys in frontend code, screenshots, or public 
 | GET | `/api/health` | Backend health check |
 | POST | `/api/chat` | AI-powered health guidance |
 | GET/POST | `/api/sig/:roomId` | Prototype video signaling relay |
+
+## Vercel Deployment
+
+Set `GEMINI_API_KEY` in the Vercel project environment settings (Production, and Preview if needed). Optionally set `GEMINI_MODEL`, `GEMINI_TIMEOUT_MS`, and `GEMINI_MAX_RETRIES`; the defaults are `gemini-3.8-flash`, `15000`, and `2`. Do not put secrets in `vercel.json` or frontend files. The `api/index.js` serverless entrypoint routes requests through the existing Express app; the app trusts one proxy hop for Vercel and the function timeout is configured to 60 seconds.
 
 ## Testing
 

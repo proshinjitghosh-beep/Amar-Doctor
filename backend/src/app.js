@@ -16,6 +16,9 @@ const publicDir = path.join(projectRoot, 'frontend', 'public');
 
 export const app = express();
 
+// Vercel terminates TLS and forwards one trusted proxy hop. This also lets
+// express-rate-limit read the real client IP without trusting arbitrary chains.
+app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: env.corsOrigin.split(',').map((value) => value.trim()), credentials: false }));
