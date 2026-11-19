@@ -15,8 +15,7 @@ export const env = {
   port: Number(process.env.PORT || 3000),
 
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite',
-
+geminiModel: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
   databaseUrl: process.env.DATABASE_URL || '',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:3000',
 };
