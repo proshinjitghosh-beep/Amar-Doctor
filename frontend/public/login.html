@@ -1,0 +1,10 @@
+<!DOCTYPE html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>লগইন</title><link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="css/style.css"></head><body><main class="w" style="max-width:440px"><div class="card" style="margin-top:40px;text-align:center"><div class="av" style="margin:0 auto 10px">✚</div><h2 style="margin:0">স্বাগতম</h2><p class="mu">আপনার একাউন্টে ঢুকুন</p>
+<div class="chips" style="justify-content:center"><button class="chip on" data-r="patient">🧑 রোগী</button><button class="chip" data-r="doctor">🧑‍⚕️ ডাক্তার</button></div>
+<button class="btn o" id="gg" style="width:100%"><b>G</b> Google দিয়ে চালিয়ে যান</button><p class="mu">অথবা</p>
+<div id="s1"><input id="ph" type="tel" placeholder="01XXXXXXXXX"><button class="btn" id="sc" style="width:100%;margin-top:10px">কোড পাঠান</button></div>
+<div id="s2" style="display:none"><input id="ot" maxlength="6" placeholder="৬ সংখ্যার কোড"><p class="mu">ডেমো কোড: <b>123456</b></p><button class="btn" id="vf" style="width:100%">যাচাই করুন</button></div></div>
+</main><script src="js/app.js"></script><script>
+let role='patient';document.querySelectorAll('[data-r]').forEach(b=>b.onclick=()=>{role=b.dataset.r;document.querySelectorAll('[data-r]').forEach(k=>k.classList.toggle('on',k==b))});
+const go=u=>{LS.s('user',{...LS.g('user',{}),...u,role});location.href=role=='doctor'?'doctor.html':(LS.g('user',{}).a?'dashboard.html':'profile.html')};
+$('#gg').onclick=()=>go({name:'ডেমো ইউজার',phone:'google'});$('#sc').onclick=()=>{if($('#ph').value.replace(/\D/g,'').length<10)return toast('সঠিক নম্বর দিন');$('#s1').style.display='none';$('#s2').style.display='block'};
+$('#vf').onclick=()=>$('#ot').value=='123456'?go({phone:$('#ph').value}):toast('ভুল কোড')</script></body></html>
