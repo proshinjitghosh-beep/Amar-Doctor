@@ -246,7 +246,7 @@ export async function listDoseLogs(userId, { from = null, to = null, medicationI
         AND ($2::timestamptz IS NULL OR d.scheduled_at >= $2)
         AND ($3::timestamptz IS NULL OR d.scheduled_at < $3)
         AND ($4::bigint IS NULL OR d.medication_id = $4)
-      ORDER BY d.scheduled_at DESC
+      ORDER BY d.scheduled_at
       LIMIT 1000`,
     [userId, from, to, medicationId]
   );

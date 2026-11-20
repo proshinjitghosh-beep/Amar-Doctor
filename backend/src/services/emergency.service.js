@@ -106,7 +106,9 @@ export async function activateEmergency(userId, { location = null, locationSourc
  * The app cannot deliver an SMS on its own without a configured provider, so
  * the delivery state reflects reality: 'unavailable' when no channel is
  * configured, 'pending' when the interface has to open the user's messaging
- * app. It is never reported as 'sent' unless it actually was.
+ * app. It is never reported as 'sent' unless it actually was - and the event
+ * is only marked 'notified' when a message really went out, so the record
+ * never overstates what happened.
  */
 export async function notifyContacts(userId, eventId, { channelAvailable = false } = {}) {
   const event = await repo.findEventById(eventId, userId);
@@ -134,10 +136,16 @@ export async function notifyContacts(userId, eventId, { channelAvailable = false
     notifications.push({ ...notification, contactName: contact.name, phone: contact.phone });
   }
 
-  await repo.updateEvent(event.id, userId, { status: 'notified' });
+  // The event is only 'notified' when a message actually went out. A
+  // prepared-but-unsent message leaves the event 'active', which is the
+  // truth: nobody has been told yet.
+  const anySent = notifications.some((notification) => notification.status === 'sent');
+  if (anySent) {
+    await repo.updateEvent(event.id, userId, { status: 'notified' });
+  }
 
   return {
-    event: { ...event, status: 'notified' },
+    event: anySent ? { ...event, status: 'notified' } : event,
     notifications,
     note: channelAvailable
       ? undefined

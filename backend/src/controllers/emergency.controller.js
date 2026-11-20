@@ -150,6 +150,9 @@ export async function notify(req, res, next) {
     const event = await repo.findEventById(req.params.id, userId);
     assertOwner(event, userId, 'জরুরি ইভেন্ট');
 
+    // `channelAvailable` says the interface has prepared a message for the
+    // patient's messaging app. It never means a message was delivered - see
+    // `notifyContacts`.
     const result = await notifyContacts(userId, event.id, {
       channelAvailable: Boolean(req.body?.channelAvailable),
     });

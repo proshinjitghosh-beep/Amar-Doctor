@@ -8,11 +8,11 @@ const router = Router();
 /**
  * The cron endpoint.
  *
- * Vercel Cron sends `Authorization: Bearer $CRON_SECRET` automatically. The
- * secret is required, so this endpoint cannot be triggered by anyone who
- * finds the URL.
+ * Vercel Cron sends a GET request with `Authorization: Bearer $CRON_SECRET`.
+ * The secret is required, so this endpoint cannot be triggered by anyone who
+ * finds the URL. A POST is accepted too, for the local npm script.
  */
-router.post('/reminders/dispatch', async (req, res, next) => {
+const dispatch = async (req, res, next) => {
   try {
     const header = req.headers.authorization || '';
     const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
@@ -29,6 +29,9 @@ router.post('/reminders/dispatch', async (req, res, next) => {
   } catch (error) {
     return next(error);
   }
-});
+};
+
+router.get('/reminders/dispatch', dispatch);
+router.post('/reminders/dispatch', dispatch);
 
 export default router;

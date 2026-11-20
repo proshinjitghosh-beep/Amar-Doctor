@@ -30,7 +30,8 @@ const KNOWN_TEST_NAMES = [
 ];
 
 const REPORT_TYPE_SIGNALS = [
-  { type: 'CBC', terms: ['cbc', 'complete blood count', 'hemogram', 'haematology', 'রক্ত পরীক্ষা', 'সিবিসি'] },
+  { type: 'CBC', terms: ['cbc', 'complete blood count', 'hemogram', 'haematology', 'রক্ত পরীক্ষা', 'সিবিসি',
+    'hemoglobin', 'haemoglobin', 'hgb', 'platelet', 'wbc count', 'total leukocyte'] },
   { type: 'LFT', terms: ['lft', 'liver function', 'liver profile', 'কলেজা ফাংশন'] },
   { type: 'KFT', terms: ['kft', 'kidney function', 'renal function', 'কিডনি'] },
   { type: 'Lipid Profile', terms: ['lipid', 'cholesterol profile', 'লিপিড'] },
@@ -112,6 +113,32 @@ function splitLabRow(line) {
 }
 
 /**
+ * Many lab reports print the reference range on its own line underneath the
+ * result, e.g.
+ *
+ *   Hemoglobin: 11.2 g/dL
+ *   Reference: 12.0 - 16.0 g/dL
+ *
+ * Such a line carries no test name, so it is attached to the row above it.
+ * The range still comes from the document — it is never supplied from a
+ * generic table.
+ */
+const REFERENCE_LINE = /^\s*(?:reference|ref|norm(?:al)?\s*value|স্বাভাবিক\s*মান|রেফারেন্স)\s*[:\-–]?\s*(.+)$/i;
+
+function parseReferenceLine(line) {
+  const match = REFERENCE_LINE.exec(line);
+  if (!match) return null;
+  const body = match[1].trim();
+  if (!body) return null;
+  // A reference line must actually contain a range or an inequality.
+  if (!/\d/.test(body)) return null;
+  if (!(/[-–—]|\bto\b|থেকে|[<>≤≥]/i.test(body))) return null;
+  const parsed = parseReferenceRange(body);
+  if (!parsed) return null;
+  return { raw: body, range: parsed };
+}
+
+/**
  * Parse the printed text of a report into structured rows.
  *
  * Each row carries `confidence`: 'high' when the value and range were both
@@ -128,6 +155,23 @@ export function parseLabResults(text) {
 
   for (const line of lines) {
     if (line.length > 200) continue;
+
+    // A standalone reference line belongs to the row printed above it.
+    if (rows.length > 0) {
+      const reference = parseReferenceLine(line);
+      if (reference) {
+        const previous = rows[rows.length - 1];
+        if (!previous.referenceRange && reference.range) {
+          previous.referenceRange = reference.raw;
+          previous.unit = previous.unit || reference.range.unit || null;
+          previous.status = compareToRange(previous.numericValue, reference.range);
+          previous.requiresReview = false;
+          previous.confidence = 'high';
+        }
+        continue;
+      }
+    }
+
     if (!looksLikeTestName(line)) continue;
 
     const parsed = splitLabRow(line);

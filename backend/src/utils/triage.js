@@ -1,10 +1,11 @@
 
 const EMERGENCY_PATTERNS = [
   /chest pain|severe chest pressure|can't breathe|cannot breathe|difficulty breathing|shortness of breath/i,
-  /unconscious|not responding|seizure|stroke|face droop|slurred speech|heavy bleeding/i,
-  /suicid|self[- ]harm|overdose/i,
+  /unconscious|not responding|seizure|stroke|face droop|slurred speech/i,
+  /suicid|self[- ]harm|self harm|overdose|hurt myself|harm myself|kill myself|want to die|end my life|take my own life/i,
+  /(heavy|severe|massive|uncontrolled|profuse)\s*bleeding|bleeding heavily/i,
   /বুকে ব্যথা|তীব্র বুকের চাপ|শ্বাসকষ্ট|শ্বাস নিতে পারছি না|অজ্ঞান|খিঁচুনি|স্ট্রোক|প্রচুর রক্তপাত/i,
-  /আত্মহত্যা|আত্মহত্যার|রক্তক্ষরণ/i,
+  /আত্মহত্যা|আত্মহত্যার|রক্তক্ষরণ|নিজেকে ক্ষতি/i,
 ];
 
 export function hasEmergencyRedFlag(text = '') {

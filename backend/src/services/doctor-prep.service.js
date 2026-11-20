@@ -43,11 +43,54 @@ Rules:
 - "main_complaint" is the reason the patient is seeking care, in one or two sentences.
 - "patient_questions" holds the questions the patient wants to ask the doctor.
 - "relevant_reports" describes only report results that were supplied, including the printed reference range where one exists.
+- Keep any qualifier in parentheses exactly as it is given, especially "(যাচাই করা হয়নি)" on a medicine. It tells the doctor the patient has not confirmed that entry.
 
 Write in the requested language.`;
 
+/**
+ * Turn a date of birth into a coarse age band.
+ *
+ * The exact date of birth is an identifier, and `docs/SAFETY.md` forbids
+ * sending identifying data to the model. A band is enough for a clinician to
+ * read the summary and is far less identifying.
+ */
+export function ageBandFromDob(dateOfBirth) {
+  const raw = String(dateOfBirth || '').trim();
+  if (!raw) return null;
+  const dob = new Date(`${raw}T00:00:00Z`);
+  if (Number.isNaN(dob.getTime())) return null;
+  const years = Math.floor((Date.now() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+  if (!Number.isFinite(years) || years < 0 || years > 130) return null;
+  if (years < 1) return 'under 1';
+  if (years < 5) return '1-4';
+  if (years < 13) return '5-12';
+  if (years < 18) return '13-17';
+  if (years < 30) return '18-29';
+  if (years < 40) return '30-39';
+  if (years < 50) return '40-49';
+  if (years < 60) return '50-59';
+  if (years < 70) return '60-69';
+  if (years < 80) return '70-79';
+  return '80+';
+}
+
+/**
+ * The identity the summary is about.
+ *
+ * This is attached by the server, never by the model, and it is the only
+ * place the patient's name lives in a summary. It is stored in the patient's
+ * own record and shown to whoever the summary is shared with - it is never
+ * put into the model prompt.
+ */
+export function buildPatientContext(profile = {}) {
+  return {
+    fullName: profile.fullName || null,
+    ageBand: ageBandFromDob(profile.dateOfBirth),
+  };
+}
+
 /** Collect the authorised health information for one appointment. */
-export async function collectContext(userId, { appointmentId = null, extraSymptoms = [] } = {}) {
+export async function collectContext(userId, { appointmentId = null, extraSymptoms = [], general = false } = {}) {
   const profile = await healthProfile.getOrCreateHealthProfile(userId);
   const symptoms = await healthProfile.listSymptoms(userId, 30);
   const medications = await medicationsRepo.listMedications(userId, { status: 'active' });
@@ -55,9 +98,14 @@ export async function collectContext(userId, { appointmentId = null, extraSympto
   const appointments = await repo.listPatientAppointments(userId, 10);
   const previousSummaries = await repo.listVisitSummaries(userId, 5);
 
-  const appointment = appointmentId
-    ? appointments.find((item) => item.id === Number(appointmentId)) || null
-    : appointments[0] || null;
+  // A general preparation is not about any one appointment. Falling back to
+  // `appointments[0]` would silently attach the most recent - often a past -
+  // appointment to it, so the fallback is skipped entirely.
+  const appointment = general
+    ? null
+    : appointmentId
+      ? appointments.find((item) => item.id === Number(appointmentId)) || null
+      : appointments[0] || null;
 
   // Only confirmed or patient-confirmed report results are shared with a
   // doctor. An unverified extraction is not treated as a clinical fact.
@@ -93,6 +141,8 @@ export async function collectContext(userId, { appointmentId = null, extraSympto
           scheduledAt: appointment.scheduledAt,
         }
       : null,
+    // Server-attached identity. Never sent to the model - see buildPrompt.
+    patientContext: buildPatientContext(profile),
     profile: {
       fullName: profile?.fullName || null,
       dateOfBirth: profile?.dateOfBirth || null,
@@ -123,6 +173,12 @@ export async function collectContext(userId, { appointmentId = null, extraSympto
     ],
     medications: medications.map((medication) => ({
       name: medication.medicineName,
+      // An unverified medicine - read out of a prescription photo, or added
+      // without the patient confirming it - must not reach the doctor as a
+      // plain fact. The label carries the marker all the way through.
+      label: medication.verificationStatus === 'patient_confirmed' || medication.verificationStatus === 'clinician_confirmed'
+        ? medication.medicineName
+        : `${medication.medicineName} (যাচাই করা হয়নি)`,
       dosage: medication.dosage,
       instructions: medication.instructions,
       startDate: medication.startDate,
@@ -214,8 +270,14 @@ export function followUpQuestions(context) {
 function buildPrompt(context, language, answers = {}) {
   const lines = [];
 
-  lines.push(`Patient name: ${context.profile.fullName || 'not recorded'}`);
-  if (context.profile.dateOfBirth) lines.push(`Date of birth: ${context.profile.dateOfBirth}`);
+  // NO IDENTIFIERS GO TO THE MODEL.
+  //
+  // `docs/SAFETY.md` forbids sending identifying patient data to the model,
+  // so the name and the exact date of birth are left out. The patient is
+  // described by an age band instead, and the name is re-attached by the
+  // server when the summary is rendered, exported or shared.
+  const patient = context.patientContext || {};
+  lines.push(`Patient age band: ${patient.ageBand || 'not recorded'}`);
   if (context.profile.sex) lines.push(`Sex: ${context.profile.sex}`);
   if (context.profile.bloodGroup) lines.push(`Blood group: ${context.profile.bloodGroup}`);
 
@@ -249,7 +311,7 @@ function buildPrompt(context, language, answers = {}) {
   lines.push(
     context.medications.length
       ? context.medications
-          .map((m) => `- ${m.name}${m.dosage ? ` ${m.dosage}` : ''}${m.instructions ? ` (${m.instructions})` : ''}`)
+          .map((m) => `- ${m.label}${m.dosage ? ` ${m.dosage}` : ''}${m.instructions ? ` (${m.instructions})` : ''}`)
           .join('\n')
       : '- none recorded'
   );
@@ -307,7 +369,10 @@ export async function generateSummary({ context, language = 'bn', answers = {} }
   });
 
   return {
+    language,
     appointment_context: context.appointment,
+    // Attached by the server. The model never saw the name.
+    patient_context: context.patientContext || null,
     main_complaint: analysis.main_complaint,
     symptoms: analysis.symptoms,
     symptom_timeline: analysis.symptom_timeline,
@@ -341,6 +406,17 @@ export function summaryToText(summary, { appointment = null, language = 'bn' } =
   };
 
   const parts = [];
+
+  // The patient's name is attached by the server, never by the model, so it is
+  // rendered here rather than coming out of the summary the AI produced.
+  const patient = summary.patient_context || {};
+  if (patient.fullName) {
+    parts.push(
+      isBn
+        ? `রোগী: ${patient.fullName}${patient.ageBand ? ` (বয়স ${patient.ageBand})` : ''}`
+        : `Patient: ${patient.fullName}${patient.ageBand ? ` (age ${patient.ageBand})` : ''}`
+    );
+  }
 
   if (appointment) {
     parts.push(
@@ -390,7 +466,31 @@ export async function saveEditedSummary(userId, summaryId, { summary, summaryTex
   if (!existing) {
     throw new HttpError(404, 'সারাংশ পাওয়া যায়নি।');
   }
-  return repo.updateVisitSummary(summaryId, userId, { summary, summaryText, status });
+
+  let nextSummary = summary;
+  let text = summaryText;
+
+  if (nextSummary) {
+    // The patient identity is the server's to set. Whatever the client sent
+    // for it is replaced, so an edit cannot rewrite who the record is about.
+    const profile = await healthProfile.getOrCreateHealthProfile(userId);
+    nextSummary = {
+      ...nextSummary,
+      patient_context: buildPatientContext(profile),
+    };
+
+    // When the structured summary is edited, the plain-text version the doctor
+    // reads - and that the print export renders - has to be rebuilt from it.
+    // Otherwise the export would keep showing the pre-edit text.
+    if (!text) {
+      const appointment = existing.appointmentId
+        ? await repo.findAppointmentById(existing.appointmentId, userId)
+        : null;
+      text = summaryToText(nextSummary, { appointment, language: nextSummary.language || 'bn' });
+    }
+  }
+
+  return repo.updateVisitSummary(summaryId, userId, { summary: nextSummary, summaryText: text, status });
 }
 
 /** Read the answers the patient gave while answering the follow-up questions. */

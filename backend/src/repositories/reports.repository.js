@@ -34,6 +34,11 @@ function mapResult(row) {
     explanation: row.explanation,
     requiresReview: row.requires_review === true,
     verificationStatus: row.verification_status,
+    // Whether the value was read out of the document or typed in by the
+    // patient. `verification_status` cannot carry this on its own: a patient
+    // who types a value and a patient who confirms an extracted value are
+    // both `patient_confirmed`.
+    source: row.source || 'extracted',
   };
 }
 
@@ -165,8 +170,8 @@ export async function replaceReportResults(reportId, userId, results) {
     const { rows } = await db.query(
       `INSERT INTO report_results
          (report_id, user_id, test_name, result_value, unit, reference_range, status,
-          interpretation, explanation, requires_review, verification_status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          interpretation, explanation, requires_review, verification_status, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
       [
         reportId,
@@ -180,11 +185,44 @@ export async function replaceReportResults(reportId, userId, results) {
         result.explanation,
         result.requiresReview,
         result.verificationStatus,
+        // A value the patient typed by hand stays labelled as such when the
+        // results are rewritten after an analysis run.
+        result.source || 'extracted',
       ]
     );
     created.push(mapResult(rows[0]));
   }
   return created;
+}
+
+/**
+ * Record one value the patient typed in by hand.
+ *
+ * Used when nothing could be read out of the document - a scanned PDF with no
+ * vision model, or an unreadable file. The value is the patient's own, so it
+ * is stored as `patient_confirmed` and marked `manual`; the status is
+ * computed by the server from the reference range the patient typed, and
+ * stays `unknown` when no range was given.
+ */
+export async function insertManualReportResult(reportId, userId, result) {
+  const db = requireDatabase();
+  const { rows } = await db.query(
+    `INSERT INTO report_results
+       (report_id, user_id, test_name, result_value, unit, reference_range, status,
+        interpretation, explanation, requires_review, verification_status, source)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, FALSE, 'patient_confirmed', 'manual')
+     RETURNING *`,
+    [
+      reportId,
+      userId,
+      result.testName,
+      result.resultValue,
+      result.unit,
+      result.referenceRange,
+      result.status,
+    ]
+  );
+  return mapResult(rows[0]);
 }
 
 export async function listReportResults(reportId, userId) {

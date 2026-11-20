@@ -1,0 +1,467 @@
+<!DOCTYPE html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>ওষুধের রিমাইন্ডার</title><link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="css/style.css"></head><body>
+<main class="w">
+  <div class="sec"><span>০১</span><b>আজকের ওষুধ</b></div>
+  <p class="mu" style="margin:-6px 0 14px;max-width:62ch">সময়মতো ওষুধ খাওয়ার জন্য সিডিউল তৈরি করুন। ডোজ খাওয়া হয়েছে কি না আপনিই নিজে চিহ্নিত করেন — অ্যাপ কখনো নিজে থেকে "খাওয়া হয়েছে" দেখায় না।</p>
+
+  <div id="gate"></div>
+
+  <div id="app" hidden>
+    <div class="g3" id="stats" style="margin-bottom:16px"></div>
+
+    <div class="sec"><span>০২</span><b>ডোজের সময়রেখা</b></div>
+    <div class="sheet"><div class="sheet-b" id="timeline"></div></div>
+
+    <div class="sec"><span>০৩</span><b>অ্যালার্ম</b></div>
+    <div class="sheet"><div class="sheet-b">
+      <div class="row" style="align-items:center;gap:10px;flex-wrap:wrap">
+        <button class="btn" id="alarmbtn">🔔 আলার্ম চালু করুন</button>
+        <span class="mu" id="alarmstate" style="font-size:13px"></span>
+      </div>
+      <div class="note" id="alarnote" style="margin-top:10px"></div>
+      <div id="inbox" style="margin-top:12px"></div>
+    </div></div>
+
+    <div class="sec"><span>০৪</span><b>আমার ওষুধ</b></div>
+    <div class="g2" id="meds"></div>
+
+    <div class="sec"><span>০৫</span><b>অনুসরণ ও সাপ্লাই</b></div>
+    <div class="sheet"><div class="sheet-b" id="adherence"></div></div>
+
+    <div class="sec"><span>০৬</span><b>প্রেসক্রিপশন যোগ করুন</b></div>
+    <div class="sheet"><div class="sheet-b">
+      <div class="drop" id="rxdrop" role="button" tabindex="0">
+        <b>প্রেসক্রিপশনের ছবি বা PDF</b>
+        <small>আপলোড করলেই ওষুধের তালিকা দেখা যাবে — যাচাই না করে কিছুই সেভ হবে না</small>
+        <input type="file" id="rxfile" accept="application/pdf,image/jpeg,image/png,image/webp" hidden>
+      </div>
+      <div id="rxout" style="margin-top:12px"></div>
+    </div></div>
+  </div>
+</main>
+
+<dialog id="md"><div id="mdb"></div><div class="row" style="margin-top:16px"><button class="btn o" onclick="md.close()">বন্ধ</button></div></dialog>
+<dialog id="addmd"><form method="dialog" id="mdform"><h3 style="margin-top:0">ওষুধ যোগ করুন</h3>
+  <div class="kv" style="gap:9px">
+    <input name="medicineName" placeholder="ওষুধের নাম *" required>
+    <div class="row"><input name="dosage" placeholder="ডোজ (যেমন ৫০০mg)"><input name="quantityOnHand" type="number" min="0" placeholder="হাতে কতটুকু আছে"></div>
+    <input name="instructions" placeholder="নির্দেশনা (যেমন: খাবারের পরে)">
+    <div class="row"><input name="reminderTime" type="time" placeholder="সময়"><select name="repeatDays"><option value="0,1,2,3,4,5,6">প্রতিদিন</option><option value="1,3,5">সপ্তাহে ৩ দিন</option><option value="0">শুধু রবিবার</option><option value="1">শুধু সোমবার</option></select></div>
+  </div>
+  <div id="mderr" style="margin-top:8px"></div>
+  <div class="row" style="margin-top:14px"><button class="btn o" type="button" onclick="addmd.close()">বাতিল</button><button class="btn" type="submit" style="flex:1">সেভ করুন</button></div>
+</form></dialog>
+
+<script src="js/app.js"></script><script src="js/health.js"></script><script>
+const {esc,api,bnDate,bnTime,bnDateTime,bnRelative,loading,empty,errorNote,gate}=H;
+let MEDS=[],DOSES=[],ALARMS=[],INBOX=[];
+
+/* -------------------------------------------------------------- alarms ---
+   The browser is asked for notification permission only from a user
+   gesture, and the reminder fires while this page is open. The app never
+   claims a reminder was delivered when it was not - the copy says exactly
+   when it works.                                                        */
+const ALARM_KEY='amar.alarms.on';
+
+function alarmSupported(){return 'Notification' in window}
+
+function alarmState(){
+  if(!alarmSupported())return'unsupported';
+  if(!localStorage.getItem(ALARM_KEY))return'off';
+  return Notification.permission==='granted'?'on':'blocked';
+}
+
+/** Doses that are still to come and have not been decided yet. */
+function upcomingDoses(){
+  const now=Date.now();
+  return DOSES
+    .filter(d=>d.status==='scheduled'&&new Date(d.scheduledAt).getTime()>now)
+    .sort((a,b)=>new Date(a.scheduledAt)-new Date(b.scheduledAt));
+}
+
+/**
+ * Fire the browser notification for a dose that is due.
+ *
+ * Returns true when the notification was actually shown, so the caller can
+ * fall back to an in-app banner when it was not.
+ */
+function fireAlarm(dose){
+  const title='💊 ওষুধের সময়';
+  const body=`${dose.medicineName||'ওষুধ'} — এখনই খান।`;
+  try{
+    if(alarmState()==='on'&&new Notification(title,{body,tag:`dose-${dose.id}`})){
+      return true;
+    }
+  }catch(e){/* fall through to the in-app banner */}
+  return false;
+}
+
+function renderAlarmState(){
+  const state=alarmState();
+  const btn=$('#alarmbtn');
+  const label=$('#alarmstate');
+  const note=$('#alarnote');
+  if(!btn||!label||!note)return;
+
+  if(state==='unsupported'){
+    btn.disabled=true;btn.textContent='🔔 ব্রাউজার সাপোর্ট করে না';
+    label.textContent='';
+    note.className='note';
+    note.innerHTML='এই ব্রাউজারে নোটিফিকেশন নেই। নিচের ডোজের তালিকা খোলা থাকলেই সময়মতো দেখা যাবে।';
+    return;
+  }
+  if(state==='off'){
+    btn.disabled=false;btn.textContent='🔔 আলার্ম চালু করুন';
+    label.textContent='চালু নয়';
+    note.className='note';
+    note.innerHTML='আলার্ম চালু করলে ডোজের সময় এই ব্রাউজারে একটি নোটিফিকেশন আসবে।<br><b>শুধু এই পেজটি খোলা থাকলেই</b> কাজ করবে — অ্যাপ বন্ধ করলে বা অন্য ট্যাবে থাকলে নোটিফিকেশন আসবে না।';
+    return;
+  }
+  if(state==='blocked'){
+    btn.disabled=true;btn.textContent='🔔 ব্রাউজারে বন্ধ করা আছে';
+    label.textContent='ব্লক করা';
+    note.className='note warn';
+    note.innerHTML='ব্রাউজারে এই সাইটের নোটিফিকেশন বন্ধ করা আছে। ব্রাউজারের সেটিংস থেকে অনুমতি দিলে আবার কাজ করবে। নিচের তালিকা সবসময় দেখা যাবে।';
+    return;
+  }
+  btn.disabled=true;btn.textContent='🔔 আলার্ম চালু আছে';
+  label.textContent='চালু';
+  note.className='note ok';
+  note.innerHTML='ডোজের সময় এই ব্রাউজারে নোটিফিকেশন আসবে — <b>যতক্ষণ এই পেজটি খোলা থাকবে</b>। অ্যাপ বন্ধ করলে নোটিফিকেশন আসবে না।';
+}
+
+function renderInbox(){
+  const box=$('#inbox');
+  if(!box)return;
+  if(!INBOX.length){box.innerHTML='';return}
+  box.innerHTML=`<div class="sec" style="margin-top:4px"><span>অ্যাপে</span><b>অ্যাপের মধ্যের বার্তা</b></div>
+    <div class="lab">${INBOX.slice(0,10).map(n=>`<div class="lab-r">
+      <div class="t">${esc(n.title||'ওষুধের রিমাইন্ডার')}</div>
+      <div class="v">${esc(n.status||'')}</div>
+      <div class="x">${esc(n.detail||'')}</div>
+    </div>`).join('')}</div>`;
+}
+
+/** Check the schedule for a dose that is due, and ring the alarm for it. */
+function checkAlarms(){
+  const now=Date.now();
+  for(const dose of DOSES){
+    if(dose.status!=='scheduled')continue;
+    const at=new Date(dose.scheduledAt).getTime();
+    if(at>now||at<now-15*60*1000)continue;
+    if(ALARMS.includes(dose.id))continue;
+    ALARMS.push(dose.id);
+    const shown=fireAlarm(dose);
+    if(!shown){
+      // No browser notification available - say it inside the page instead.
+      toast(`⏰ ${dose.medicineName||'ওষুধ'} — এখনই খান।`);
+    }
+  }
+}
+
+async function enableAlarms(){
+  if(!alarmSupported())return;
+  try{
+    const permission=await Notification.requestPermission();
+    if(permission==='granted'){
+      localStorage.setItem(ALARM_KEY,'1');
+      toast('আলার্ম চালু হয়েছে');
+    }else{
+      localStorage.setItem(ALARM_KEY,'1');
+    }
+  }catch(e){/* the browser refused - the in-page list still works */}
+  renderAlarmState();
+  checkAlarms();
+}
+
+/* -------------------------------------------------------------- stats ---- */
+function renderStats(){
+  const now=new Date();
+  const today=DOSES.filter(d=>new Date(d.scheduledAt).toDateString()===now.toDateString());
+  const taken=today.filter(d=>d.status==='taken').length;
+  const due=DOSES.filter(d=>d.status==='scheduled'&&new Date(d.scheduledAt)<=now).length;
+  const upcoming=today.filter(d=>d.status==='scheduled'&&new Date(d.scheduledAt)>now).length;
+  $('#stats').innerHTML=`
+    <div class="sheet"><div class="sheet-b tight"><div class="kv"><b class="fig">${today.length}</b><span>আজকের ডোজ</span></div></div></div>
+    <div class="sheet"><div class="sheet-b tight"><div class="kv"><b class="fig" style="color:var(--g)">${taken}</b><span>খাওয়া হয়েছে</span></div></div></div>
+    <div class="sheet"><div class="sheet-b tight"><div class="kv"><b class="fig" style="color:var(--r)">${due}</b><span>বাকি</span></div></div></div>
+    <div class="sheet"><div class="sheet-b tight"><div class="kv"><b class="fig">${upcoming}</b><span>আসছে</span></div></div></div>`;
+}
+
+/* ----------------------------------------------------------- timeline ---- */
+function doseClass(d){
+  if(d.status==='taken')return 'taken';
+  if(d.status==='skipped')return 'skipped';
+  if(d.status==='missed')return 'missed';
+  if(d.status==='snoozed')return 'snoozed';
+  const diff=new Date(d.scheduledAt).getTime()-Date.now();
+  if(diff<0)return 'missed';
+  if(diff<60*60*1000)return 'now';
+  return '';
+}
+
+function renderTimeline(){
+  const box=$('#timeline');
+  const now=new Date();
+  const soon=DOSES.filter(d=>new Date(d.scheduledAt)<new Date(now.getTime()+3*86400000)).slice(0,40);
+  if(!soon.length){box.innerHTML=empty('কোনো ডোজ নেই','নিচে থেকে ওষুধ ও সময় যোগ করুন','◷');return}
+  box.innerHTML='<ul class="tl">'+soon.map(d=>{
+    const c=doseClass(d);
+    const actions=d.status==='scheduled'
+      ?`<div class="row" style="gap:6px;flex-wrap:wrap">
+         <button class="btn" data-taken="${d.id}" style="padding:6px 14px;font-size:13px">খেয়েছি</button>
+         <button class="btn o" data-snooze="${d.id}" style="padding:6px 14px;font-size:13px">৩০ মিনিট পরে</button>
+         <button class="btn o" data-skip="${d.id}" style="padding:6px 14px;font-size:13px">খাবেন না</button>
+       </div>`:'';
+    const badge=d.status==='taken'?'<span class="pill g">খাওয়া হয়েছে</span>':d.status==='skipped'?'<span class="pill o">বাদ দেওয়া</span>':d.status==='snoozed'?'<span class="pill a">স্নুজড</span>':c==='missed'?'<span class="pill r">সময় পেরিয়েছে</span>':'';
+    return `<li class="${c}">
+      <div class="row" style="align-items:center;gap:8px"><span class="when">${esc(bnTime(d.scheduledAt))}</span>${badge}</div>
+      <div class="what">${esc(d.medicineName||'')}</div>
+      <div class="mu" style="font-size:12.5px">${esc(bnDate(d.scheduledAt))} · ${esc(bnRelative(d.scheduledAt))}</div>
+      ${actions}</li>`;
+  }).join('')+'</ul>';
+
+  box.querySelectorAll('[data-taken]').forEach(b=>b.onclick=()=>mark(b.dataset.taken,'taken'));
+  box.querySelectorAll('[data-skip]').forEach(b=>b.onclick=()=>mark(b.dataset.skip,'skipped'));
+  box.querySelectorAll('[data-snooze]').forEach(b=>b.onclick=()=>mark(b.dataset.snooze,'snooze'));
+}
+
+async function mark(id,kind){
+  try{
+    await api('POST','/api/reminders/'+id+'/'+kind,kind==='snooze'?{minutes:30}:{});
+    toast(kind==='taken'?'খাওয়া হয়েছে হিসেবে নোট করা হলো':kind==='skipped'?'বাদ দেওয়া হিসেবে নোট করা হলো':'৩০ মিনিট পরে স্নুজ হবে');
+    await loadAll();
+  }catch(error){toast(error.message)}
+}
+
+/* ---------------------------------------------------- adherence & refill ---
+   The adherence percentage is computed over the doses the patient actually
+   marked, not over every dose that was scheduled - so the wording says so
+   rather than implying the app tracked unrecorded doses.               */
+async function loadAdherence(){
+  const box=$('#adherence');
+  box.innerHTML=loading('হিসাব নির্ণয় হচ্ছে…');
+  try{
+    const [adherence,refill]=await Promise.all([
+      api('GET','/api/medications/adherence'),
+      api('GET','/api/medications/refill-status'),
+    ]);
+    const a=adherence.adherence||{};
+    const pct=Number(a.adherencePercent||0);
+    const tone=pct>=80?'':'low';
+
+    const items=(refill.refill&&refill.refill.items)||[];
+    const refillHtml=items.length
+      ?`<div class="lab" style="margin-top:10px">${items.map(i=>`<div class="lab-r">
+          <div class="t">${esc(i.medicineName)}</div>
+          <div class="v${i.needsRefill?'':''}">${i.estimatedDaysRemaining==null?'—':`<span class="fig">${i.estimatedDaysRemaining}</span> দিন`}</div>
+          <div class="rg">হাতে আছে: <span class="fig">${esc(i.quantityOnHand)}</span>${i.dosesPerDay?` · দৈনিক ${i.dosesPerDay} ডোজ`:''}</div>
+          ${i.note?`<div class="x">${esc(i.note)}</div>`:''}
+          ${i.needsRefill?`<div class="x" style="color:var(--r)">সাপ্লাই শেষ হওয়ার কাছাকাছি — নতুন করার কথা ভাবুন।</div>`:''}
+        </div>`).join('')}</div>`
+      :'<div class="mu" style="margin-top:10px;font-size:13px">সাপ্লাইয়ের হিসাব করার জন্য কোনো ওষুধে পরিমাণ দেওয়া নেই।</div>';
+
+    box.innerHTML=`
+      <div class="row" style="align-items:flex-end;gap:14px;flex-wrap:wrap">
+        <div class="kv"><b class="fig" style="font-size:30px;color:${pct>=80?'var(--g)':'var(--r)'}">${esc(pct)}%</b>
+          <span>গত ৭ দিনে চিহ্নিত ডোজের মধ্যে খাওয়া হয়েছে</span></div>
+        <div style="flex:1;min-width:180px">
+          <div class="meter"><i class="${tone}" style="width:${Math.max(0,Math.min(100,pct))}%"></i></div>
+        </div>
+      </div>
+      <div class="g3" style="margin-top:12px">
+        <div class="kv"><b class="fig">${esc(a.taken||0)}</b><span>খাওয়া হয়েছে</span></div>
+        <div class="kv"><b class="fig">${esc(a.skipped||0)}</b><span>বাদ দেওয়া</span></div>
+        <div class="kv"><b class="fig">${esc(a.snoozed||0)}</b><span>স্নুজ করা</span></div>
+      </div>
+      <div class="note" style="margin-top:12px">শতাংশটি হিসাব করা হয়েছে <b>যে ডোজগুলো আপনি চিহ্নিত করেছেন</b> তার মধ্যে। সময় পেরিয়ে যাওয়া কিন্তু চিহ্নিত না করা ডোজ এখানে গোনা হয়নি।</div>
+      <div class="sec" style="margin-top:20px"><span>সাপ্লাই</span><b>কতদিন চলবে</b></div>
+      ${refill.refill&&refill.refill.note?`<div class="mu" style="font-size:13px">${esc(refill.refill.note)}</div>`:''}
+      ${refillHtml}`;
+  }catch(error){box.innerHTML=errorNote(error.message)}
+}
+
+/* --------------------------------------------------------- medication ---- */
+function renderMeds(){
+  const box=$('#meds');
+  if(!MEDS.length){box.innerHTML=`<div class="sheet">${empty('কোনো ওষুধ যোগ করা হয়নি','নিচে থেকে ওষুধ যোগ করুন','◷')}</div>`;return}
+  box.innerHTML=MEDS.map(m=>{
+    const dose=m.schedules&&m.schedules.length
+      ?m.schedules.map(s=>`${esc(s.reminderTime)} · ${esc(weekLabel(s.repeatDays))}`).join('<br>')
+      :'<span class="mu">সময়সূচি নেই</span>';
+    const verified=m.verificationStatus==='clinician_confirmed'
+      ?'<span class="stamp">চিকিৎসকের প্রেসক্রিপশন</span>'
+      :m.verificationStatus==='patient_confirmed'?'<span class="stamp">আপনি যাচাই করেছেন</span>'
+      :'<span class="stamp wait">যাচাই দরকার</span>';
+    // A medicine that was read out of a prescription photo is not confirmed
+    // until the patient says so, so it gets its own confirm button.
+    const confirm=m.verificationStatus==='needs_review'
+      ?`<button class="btn" data-confirm="${m.id}" style="width:100%;margin-top:8px;padding:8px 12px;font-size:13px">✓ ঠিক আছে — যাচাই করেছি</button>`
+      :'';
+    return `<div class="sheet"><div class="sheet-h"><b>${esc(m.medicineName)}</b><small>${esc(m.dosage||'')}</small></div>
+      <div class="sheet-b tight">
+      <div style="margin-bottom:8px">${verified}</div>
+      <p class="mu" style="margin:0 0 6px;font-size:13px">${esc(m.instructions||'নির্দেশনা নেই')}</p>
+      <p class="mu fig" style="margin:0 0 6px;font-size:13px">${dose}</p>
+      ${m.quantityOnHand!==null&&m.quantityOnHand!==undefined?`<p class="mu" style="margin:0;font-size:13px">হাতে আছে: <b class="fig">${m.quantityOnHand}</b></p>`:''}
+      ${confirm}
+      <div class="row" style="margin-top:10px;gap:6px">
+        <button class="btn o" data-edit="${m.id}" style="flex:1;padding:8px 12px;font-size:13px">সম্পাদনা ও সময়সূচি</button>
+        <button class="btn o" data-stop="${m.id}" style="flex:1;padding:8px 12px;font-size:13px">বন্ধ করুন</button>
+      </div></div></div>`;
+  }).join('');
+  box.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openMed(b.dataset.edit));
+  box.querySelectorAll('[data-confirm]').forEach(b=>b.onclick=async()=>{
+    try{await api('PUT','/api/medications/'+b.dataset.confirm,{verificationStatus:'patient_confirmed'});toast('যাচাই করা হয়েছে');await loadAll()}
+    catch(error){toast(error.message)}
+  });
+  box.querySelectorAll('[data-stop]').forEach(b=>b.onclick=async()=>{
+    if(!confirm('এই ওষুধটি বন্ধ করবেন?'))return;
+    try{await api('DELETE','/api/medications/'+b.dataset.stop);toast('ওষুধটি বন্ধ করা হয়েছে');await loadAll()}catch(error){toast(error.message)}
+  });
+}
+
+function weekLabel(days){
+  const names=['রবি','সোম','মঙ্গল','বুধ','বৃহঃ','শুক্র','শনি'];
+  const list=String(days||'').split(',').map(Number);
+  if(list.length===7)return'প্রতিদিন';
+  return list.map(d=>names[d]).filter(Boolean).join(', ');
+}
+
+function openMed(id){
+  const m=MEDS.find(x=>x.id===Number(id));
+  if(!m){toast('ওষুধটি আর পাওয়া যাচ্ছে না');return}
+  $('#mdb').innerHTML=`<div class="sec" style="margin-top:0"><span>ওষুধ</span><b>${esc(m.medicineName)}</b></div>
+  <div class="kv" style="gap:9px;margin-bottom:14px">
+    <input id="ename" placeholder="ওষুধের নাম" value="${esc(m.medicineName||'')}">
+    <div class="row"><input id="edosage" placeholder="ডোজ" value="${esc(m.dosage||'')}"><input id="eqty" type="number" min="0" placeholder="হাতে কতটুকু আছে" value="${m.quantityOnHand===null||m.quantityOnHand===undefined?'':esc(m.quantityOnHand)}"></div>
+    <input id="einst" placeholder="নির্দেশনা" value="${esc(m.instructions||'')}">
+    <button class="btn" id="msave" style="width:100%">ওষুধের তথ্য সংরক্ষণ করুন</button>
+    <div id="mederr" style="margin-top:4px"></div>
+  </div>
+  <div class="sec" style="margin-top:4px"><span>সময়সূচি</span><b>কখন খাবেন</b></div>
+  ${m.schedules&&m.schedules.length?m.schedules.map(s=>`<div class="row" style="padding:10px 0;border-bottom:1px dashed var(--ln);align-items:center">
+    <span class="fig" style="font-size:18px;font-weight:600">${esc(s.reminderTime)}</span>
+    <span class="mu" style="margin-left:8px">${esc(weekLabel(s.repeatDays))}</span>
+    <button class="btn o" data-delsch="${s.id}" style="margin-left:auto;padding:6px 12px;font-size:13px">বাদ দিন</button></div>`).join('')
+    :empty('এই ওষুধের কোনো সময়সূচি নেই')}
+    <div style="margin-top:14px"><b style="font-size:14px">নতুন সময়সূচি</b>
+    <div class="row" style="margin-top:8px">
+      <input type="time" id="ntime" value="08:00">
+      <select id="nday"><option value="0,1,2,3,4,5,6">প্রতিদিন</option><option value="1,3,5">সপ্তাহে ৩ দিন</option><option value="0">রবিবার</option><option value="1">সোমবার</option></select>
+      <button class="btn" id="addsch">যোগ করুন</button>
+    </div></div>`;
+  md.showModal();
+  $('#msave').onclick=async()=>{
+    const btn=$('#msave');
+    btn.disabled=true;
+    $('#mederr').innerHTML='';
+    const qty=$('#eqty').value;
+    try{
+      await api('PUT','/api/medications/'+m.id,{
+        medicineName:$('#ename').value.trim(),
+        dosage:$('#edosage').value.trim()||undefined,
+        instructions:$('#einst').value.trim()||undefined,
+        quantityOnHand:qty===''?null:Number(qty),
+      });
+      toast('ওষুধের তথ্য সংরক্ষণ হয়েছে');
+      md.close();await loadAll();
+    }catch(error){$('#mederr').innerHTML=errorNote(error.message);btn.disabled=false}
+  };
+  $('#addsch').onclick=async()=>{
+    try{
+      await api('POST','/api/reminders',{medicationId:m.id,reminderTime:$('#ntime').value,repeatDays:$('#nday').value,timezone:'Asia/Dhaka'});
+      toast('সময়সূচি যোগ হয়েছে');md.close();await loadAll();
+    }catch(error){toast(error.message)}
+  };
+  $('#mdb').querySelectorAll('[data-delsch]').forEach(b=>b.onclick=async()=>{
+    try{await api('DELETE','/api/reminders/'+b.dataset.delsch);md.close();await loadAll()}catch(error){toast(error.message)}
+  });
+}
+
+/* ------------------------------------------------------- prescription ---- */
+$('#rxdrop').addEventListener('click',()=>$('#rxfile').click());
+$('#rxfile').addEventListener('change',async e=>{
+  const file=e.target.files[0];if(!file)return;
+  $('#rxout').innerHTML=`<div class="note">${loading('প্রেসক্রিপশন পড়া হচ্ছে…')}</div>`;
+  const form=new FormData();form.append('file',file);
+  try{
+    const data=await api('POST','/api/medications/extract-prescription',form);
+    if(!data.candidates.length){$('#rxout').innerHTML=empty('প্রেসক্রিপশনে কোনো ওষুধ পড়া যায়নি','ছবিটি আরও স্পষ্ট হলে চেষ্টা করুন','◫');return}
+    $('#rxout').innerHTML=`<div class="note warn"><b>যাচাই করুন</b>${esc(data.note)}</div>
+      <div class="lab" style="margin-top:10px">${data.candidates.map((c,i)=>`<div class="lab-r">
+        <div class="t">${esc(c.medicineName)}</div>
+        <div class="v">${esc(c.dosage||'—')}</div>
+        ${c.instructions?`<div class="rg">${esc(c.instructions)}</div>`:''}
+        <div class="x">${esc(c.frequency||'')}</div>
+        <div style="grid-column:1/-1"><button class="btn" data-add="${i}" style="width:100%;margin-top:6px">এটি আমার ওষুধ — যোগ করুন</button></div>
+      </div>`).join('')}</div>`;
+    $('#rxout').querySelectorAll('[data-add]').forEach(b=>b.onclick=async()=>{
+      const c=data.candidates[Number(b.dataset.add)];
+      try{
+        // It is saved as "needs review", because the app read the name out of
+        // a photo - it did not read the whole prescription. The patient
+        // confirms it from the medicine list afterwards.
+        await api('POST','/api/medications',{medicineName:c.medicineName,dosage:c.dosage||'',instructions:c.instructions||'',verificationStatus:'needs_review'});
+        toast('ওষুধ যোগ হয়েছে — "আমার ওষুধ" থেকে যাচাই করুন');await loadAll();
+      }catch(error){toast(error.message)}
+    });
+  }catch(error){$('#rxout').innerHTML=errorNote(error.message)}
+});
+
+/* --------------------------------------------------------------- boot ---- */
+async function loadAll(){
+  const [meds,doses,notes]=await Promise.all([
+    api('GET','/api/medications'),
+    api('GET','/api/reminders'),
+    api('GET','/api/notifications').catch(()=>({notifications:[]})),
+  ]);
+  MEDS=meds.medications;DOSES=doses.reminders;
+  INBOX=notes.notifications||[];
+  renderStats();renderTimeline();renderMeds();renderInbox();
+  checkAlarms();
+}
+
+document.addEventListener('DOMContentLoaded',()=>{
+  const open=()=>{addmd.showModal();$('#mderr').innerHTML=''};
+  const addBtn=document.createElement('button');
+  addBtn.className='btn';addBtn.style.width='100%';addBtn.style.margin='12px 0';
+  addBtn.textContent='＋ নতুন ওষুধ যোগ করুন';
+  addBtn.onclick=open;
+  $('#stats').before(addBtn);
+
+  $('#mdform').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const f=e.target;
+    const payload={medicineName:f.medicineName.value.trim(),dosage:f.dosage.value.trim()||undefined,
+      instructions:f.instructions.value.trim()||undefined,
+      quantityOnHand:f.quantityOnHand.value===''?undefined:Number(f.quantityOnHand.value)};
+    try{
+      const data=await api('POST','/api/medications',payload);
+      if(f.reminderTime.value){
+        await api('POST','/api/reminders',{medicationId:data.medication.id,reminderTime:f.reminderTime.value,repeatDays:f.repeatDays.value,timezone:'Asia/Dhaka'});
+      }
+      addmd.close();f.reset();toast('ওষুধ যোগ হয়েছে');await loadAll();
+    }catch(error){$('#mderr').innerHTML=errorNote(error.message)}
+  });
+});
+
+H.ready(async()=>{
+  if(!H.isSignedIn()){
+    gate($('#gate'),{title:'অ্যাকাউন্ট লাগবে',hint:'ওষুধের সিডিউল ও ডোজের ইতিহাস আপনার নিজের অ্যাকাউন্টে থাকে।',onSignedIn:()=>location.reload()});
+    return;
+  }
+  $('#app').hidden=false;
+  renderAlarmState();
+  const alarm=$('#alarmbtn');
+  if(alarm)alarm.onclick=enableAlarms;
+  try{await loadAll()}catch(error){toast(error.message)}
+  await loadAdherence();
+
+  /*
+   * The reminder list is re-read every five minutes. It is not a tighter
+   * loop on purpose: reading the reminders writes the dose rows to the
+   * database, so polling every few seconds would hammer it for no gain.
+   */
+  setInterval(()=>{loadAll().catch(()=>{});loadAdherence().catch(()=>{});},5*60*1000);
+});
+</script></body></html>

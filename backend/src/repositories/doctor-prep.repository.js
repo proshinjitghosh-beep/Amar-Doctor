@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { requireDatabase } from '../config/database.js';
 
 function mapSummary(row) {
@@ -139,19 +141,29 @@ export async function createAppointment(userId, { doctorName, scheduledAt, speci
 
 // ------------------------------------------------------------ share links ---
 
+/**
+ * A share token is a bearer credential for a medical summary, so only its
+ * SHA-256 hash is stored - the same treatment session tokens get. A dump of
+ * the database therefore contains no working share links.
+ */
+function hashShareToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
 export async function createShareLink(userId, visitSummaryId, { recipientName = null, expiresAt = null }) {
   const db = requireDatabase();
-  const { randomBytes } = await import('node:crypto');
   const token = randomBytes(24).toString('base64url');
   const { rows } = await db.query(
     `INSERT INTO share_links (user_id, visit_summary_id, token, recipient_name, expires_at)
      VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, token, recipient_name, expires_at, created_at`,
-    [userId, visitSummaryId, token, recipientName, expiresAt]
+     RETURNING id, recipient_name, expires_at, created_at`,
+    [userId, visitSummaryId, hashShareToken(token), recipientName, expiresAt]
   );
   return {
     id: Number(rows[0].id),
-    token: rows[0].token,
+    // The raw token is returned once, here, and never stored - so this is the
+    // only moment the owner can copy the link.
+    token,
     recipientName: rows[0].recipient_name,
     expiresAt: rows[0].expires_at,
     createdAt: rows[0].created_at,
@@ -161,7 +173,7 @@ export async function createShareLink(userId, visitSummaryId, { recipientName = 
 export async function listShareLinks(userId, visitSummaryId) {
   const db = requireDatabase();
   const { rows } = await db.query(
-    `SELECT id, token, recipient_name, revoked_at, expires_at, view_count, created_at
+    `SELECT id, recipient_name, revoked_at, expires_at, view_count, created_at
        FROM share_links
       WHERE user_id = $1 AND visit_summary_id = $2
       ORDER BY created_at DESC`,
@@ -169,7 +181,7 @@ export async function listShareLinks(userId, visitSummaryId) {
   );
   return rows.map((row) => ({
     id: Number(row.id),
-    token: row.token,
+    // The token itself is not recoverable - only its hash was stored.
     recipientName: row.recipient_name,
     revokedAt: row.revoked_at,
     expiresAt: row.expires_at,
@@ -202,7 +214,7 @@ export async function findSharedSummary(token) {
        FROM share_links sl
        JOIN visit_summaries vs ON vs.id = sl.visit_summary_id
       WHERE sl.token = $1`,
-    [token]
+    [hashShareToken(token)]
   );
   const row = rows[0];
   if (!row) return null;

@@ -22,6 +22,16 @@ const medicationSchema = z.object({
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal('')).optional(),
   quantityOnHand: z.number().nonnegative().optional().nullable(),
   status: z.enum(['active', 'paused', 'discontinued']).optional(),
+  // How sure we are that this medicine is really what the patient takes.
+  //
+  // A medicine the patient typed by hand is `patient_confirmed`. A candidate
+  // read out of a prescription photo or PDF is only `needs_review` until the
+  // patient confirms it - the app must not show it as verified when it is not.
+  //
+  // `clinician_confirmed` is deliberately NOT accepted here: it is the
+  // server's word, set only by the prescription import path, and a patient
+  // session must not be able to self-certify as a clinician.
+  verificationStatus: z.enum(['extracted', 'needs_review', 'patient_confirmed']).optional(),
 });
 
 const scheduleSchema = z.object({

@@ -76,7 +76,21 @@ export async function getRefillStatus(userId) {
       return total + days / 7;
     }, 0);
 
-    if (!dosesPerDay) continue;
+    // Without a schedule we do not know how many doses a day the patient
+    // takes, so no honest estimate is possible. The medicine is still listed
+    // so the patient can see why it has no estimate.
+    if (!dosesPerDay) {
+      items.push({
+        medicationId: medication.id,
+        medicineName: medication.medicineName,
+        quantityOnHand: medication.quantityOnHand,
+        dosesPerDay: null,
+        estimatedDaysRemaining: null,
+        needsRefill: false,
+        note: 'সময়সূচি নির্ধারণ করা হয়নি — অনুমান করা যায়নি।',
+      });
+      continue;
+    }
 
     const daysOfSupply = medication.quantityOnHand / dosesPerDay;
     items.push({
@@ -86,13 +100,14 @@ export async function getRefillStatus(userId) {
       dosesPerDay: Math.round(dosesPerDay * 100) / 100,
       estimatedDaysRemaining: Math.floor(daysOfSupply),
       needsRefill: daysOfSupply <= 7,
+      note: null,
     });
   }
 
   return {
     estimate: true,
     note: 'সাপ্লাই প্রত্যাশা একটি আনুমানিক হিসাব — ডোজ ও প্রকৃত ব্যবহারের ওপর নির্ভর করে।',
-    items: items.sort((a, b) => a.estimatedDaysRemaining - b.estimatedDaysRemaining),
+    items: items.sort((a, b) => (a.estimatedDaysRemaining ?? Infinity) - (b.estimatedDaysRemaining ?? Infinity)),
   };
 }
 

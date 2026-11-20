@@ -38,6 +38,19 @@ function writeSessionCookie(res, token, expiresAt) {
   res.append('Set-Cookie', parts.join('; '));
 }
 
+/**
+ * Expire the session cookie.
+ *
+ * The attributes must match the ones `writeSessionCookie` used, otherwise a
+ * browser can keep a copy of the old cookie - the `Secure` flag in
+ * particular has to line up with what was set.
+ */
+function clearSessionCookie(res) {
+  const parts = [`${SESSION_COOKIE}=`, 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
+  if (process.env.NODE_ENV === 'production') parts.push('Secure');
+  res.append('Set-Cookie', parts.join('; '));
+}
+
 export async function register(req, res, next) {
   try {
     const parsed = registerSchema.safeParse(req.body || {});
@@ -90,10 +103,12 @@ export async function login(req, res, next) {
 
 export async function logout(req, res, next) {
   try {
+    // The session row is revoked as well as the cookie being cleared, so the
+    // token cannot be replayed until its TTL runs out.
     if (req.sessionToken) {
       await revokeSession(req.sessionToken);
     }
-    res.append('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+    clearSessionCookie(res);
     return res.json({ ok: true });
   } catch (error) {
     return next(error);
@@ -112,7 +127,7 @@ export async function me(req, res, next) {
 export async function logoutAll(req, res, next) {
   try {
     await revokeAllSessions(req.user.id);
-    res.append('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+    clearSessionCookie(res);
     return res.json({ ok: true });
   } catch (error) {
     return next(error);

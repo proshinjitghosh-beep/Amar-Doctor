@@ -50,4 +50,17 @@ export const env = {
   emergencyRegion: process.env.EMERGENCY_REGION || 'bd',
 
   uploadMaxBytes: boundedInteger(process.env.UPLOAD_MAX_BYTES, 8 * 1024 * 1024, 1024, 20 * 1024 * 1024),
+
+  // Rate limits. The test suite issues many requests in a row, so the limits
+  // are lifted there; the production values are unchanged.
+  isTest: process.env.NODE_ENV === 'test',
+  // The general /api limit covers every read the pages make. Each page load
+  // spends several of these (session check, health profile, module list), so
+  // a low ceiling locks a browsing user out of their own records. The
+  // security-sensitive endpoints have their own, much tighter limits.
+  apiRateLimit: boundedInteger(process.env.API_RATE_LIMIT, 300, 1, 100000),
+  chatRateLimit: boundedInteger(process.env.CHAT_RATE_LIMIT, 10, 1, 100000),
+  authRateLimit: boundedInteger(process.env.AUTH_RATE_LIMIT, 10, 1, 100000),
+  sessionRateLimit: boundedInteger(process.env.SESSION_RATE_LIMIT, 300, 1, 100000),
+  uploadRateLimit: boundedInteger(process.env.UPLOAD_RATE_LIMIT, 20, 1, 100000),
 };

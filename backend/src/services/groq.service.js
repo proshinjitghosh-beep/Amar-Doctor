@@ -110,7 +110,7 @@ async function callGroq({ messages, temperature = 0.4, maxTokens = 1200, model, 
   } catch (error) {
     // The error message can contain a URL but never patient content.
     console.error('Groq connection failed:', error.message);
-    throw new HttpError(502, 'AI service is temporarily unavailable.');
+    throw new HttpError(502, 'AI সেবা সাময়িকভাবে উপলব্ধ নেই।');
   }
 
   const payload = await response.json().catch(() => ({}));
@@ -121,16 +121,19 @@ async function callGroq({ messages, temperature = 0.4, maxTokens = 1200, model, 
       response.status,
       payload?.error?.message || 'Unknown provider error'
     );
-    const error = new HttpError(502, 'AI request failed. Please try again later.');
+    // The client always sees a 502: a provider failure is our problem, not
+    // the caller's bad request. The provider's own status is kept on a
+    // separate field so the retry logic can decide what to do with it.
+    const error = new HttpError(502, 'AI সেবায় অনুরোধ ব্যর্থ হয়েছে। একটু পরে আবার চেষ্টা করুন।');
     error.retryable = RETRYABLE_STATUSES.has(response.status);
     error.retryAfter = response.headers?.get?.('retry-after') || null;
-    error.status = response.status;
+    error.providerStatus = response.status;
     throw error;
   }
 
   const content = payload?.choices?.[0]?.message?.content?.trim();
   if (!content) {
-    throw new HttpError(502, 'Groq returned an empty response.');
+    throw new HttpError(502, 'AI সেবা থেকে উত্তর পাওয়া যায়নি।');
   }
   return content;
 }
@@ -143,7 +146,7 @@ async function callGroq({ messages, temperature = 0.4, maxTokens = 1200, model, 
  */
 export async function completeText({ system, messages, temperature = 0.4, maxTokens = 1200, model = env.groqModel }) {
   if (!env.groqApiKey) {
-    throw new HttpError(503, 'Groq API key is not configured.');
+    throw new HttpError(503, 'AI সেবাটি এখন কনফিগার করা নেই।');
   }
 
   const groqMessages = [
@@ -184,7 +187,7 @@ export async function completeJson(options) {
   try {
     return parseJsonContent(content);
   } catch {
-    throw new HttpError(502, 'AI returned an invalid response format.');
+    throw new HttpError(502, 'AI সেবার উত্তরের ফরম্যাট সঠিক ছিল না।');
   }
 }
 
@@ -213,7 +216,7 @@ export async function getHealthGuidance(messages) {
  */
 export async function completeVisionJson({ system, prompt, imageDataUrl, mimeType = 'image/png', maxTokens = 2000 }) {
   if (!env.groqApiKey) {
-    throw new HttpError(503, 'Groq API key is not configured.');
+    throw new HttpError(503, 'AI সেবাটি এখন কনফিগার করা নেই।');
   }
   if (!env.groqVisionModel) {
     throw new HttpError(503, 'ছবি থেকে লেখা পড়ার ফিচারটি কনফিগার করা হয়নি।');

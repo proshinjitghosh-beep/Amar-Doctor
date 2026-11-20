@@ -7,7 +7,12 @@ import { validateUpload } from '../middleware/upload-validation.js';
 import { assertOwner } from '../middleware/ownership-check.js';
 import { recordAudit } from '../services/audit.service.js';
 import { HttpError } from '../utils/http-error.js';
-import { cleanText } from '../utils/medical-validation.js';
+import {
+  cleanText,
+  compareToRange,
+  parseNumericValue,
+  parseReferenceRange,
+} from '../utils/medical-validation.js';
 
 const askSchema = z.object({
   question: z.string().trim().min(1).max(1000),
@@ -24,6 +29,21 @@ const confirmSchema = z.object({
     )
     .min(1)
     .max(200),
+});
+
+/**
+ * A value the patient typed in by hand.
+ *
+ * There is deliberately no `status` field: the app must never accept a
+ * normal/abnormal judgement from the client. The status is the server's own
+ * comparison of the value against the reference range, and stays `unknown`
+ * when no range was typed.
+ */
+const manualResultSchema = z.object({
+  testName: z.string().trim().min(1).max(160),
+  resultValue: z.string().trim().min(1).max(120),
+  unit: z.string().trim().max(40).optional(),
+  referenceRange: z.string().trim().max(60).optional(),
 });
 
 /**
@@ -199,6 +219,7 @@ export async function analyzeReportEndpoint(req, res, next) {
           referenceRange: row.referenceRange,
           status: row.status,
           requiresReview: row.requiresReview,
+          source: row.source,
         })),
         language,
         reportType: report.reportType,
@@ -232,11 +253,15 @@ export async function analyzeReportEndpoint(req, res, next) {
           resultValue: row.resultValue,
           unit: row.unit,
           referenceRange: row.referenceRange,
-          status: match?.status || row.status,
+          // The status always comes from our own comparison against the
+          // printed reference range - the AI cannot change it.
+          status: row.status,
           interpretation: match?.interpretation || null,
           explanation: match?.explanation || null,
           requiresReview: match?.requiresReview ?? row.requiresReview,
           verificationStatus: row.verificationStatus,
+          // A value the patient typed in by hand keeps its label.
+          source: row.source,
         };
       })
     );
@@ -270,16 +295,24 @@ export async function askAboutReport(req, res, next) {
     }
 
     const rows = await reportsRepo.listReportResults(report.id, userId);
-    const answer = await answerQuestionAboutReport({
-      rows: rows.map((row) => ({
-        testName: row.testName,
-        resultValue: row.resultValue,
-        unit: row.unit,
-        referenceRange: row.referenceRange,
-      })),
-      question: parsed.data.question,
-      language: parsed.data.language || 'bn',
-    });
+    let answer;
+    try {
+      answer = await answerQuestionAboutReport({
+        rows: rows.map((row) => ({
+          testName: row.testName,
+          resultValue: row.resultValue,
+          unit: row.unit,
+          referenceRange: row.referenceRange,
+          source: row.source,
+        })),
+        question: parsed.data.question,
+        language: parsed.data.language || 'bn',
+      });
+    } catch (error) {
+      // The provider's own error is English and names the provider. The
+      // patient gets a plain Bangla explanation instead.
+      throw new HttpError(503, 'AI সেবাটি এখন উপলব্ধ নেই। রিপোর্টটি সংরক্ষিত আছে — পরে আবার চেষ্টা করুন।');
+    }
 
     return res.json({ answer: answer.answer, grounded: answer.grounded });
   } catch (error) {
@@ -314,6 +347,64 @@ export async function deleteReport(req, res, next) {
     }
     await recordAudit({ userId, action: 'report.delete', resourceType: 'medical_report', resourceId: req.params.id });
     return res.json({ ok: true });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * Record a value the patient typed in by hand.
+ *
+ * This is the path for a report the server could not read - a scanned PDF
+ * with no vision model configured, or an unreadable file. The patient
+ * supplies the value and, optionally, the reference range printed on their
+ * report; the status is computed by the server from that range and stays
+ * `unknown` when there is none. Nothing about the value is invented.
+ */
+export async function createManualResult(req, res, next) {
+  try {
+    const userId = req.user.id;
+    const report = await reportsRepo.findReportById(req.params.id, userId);
+    assertOwner(report, userId, 'রিপোর্ট');
+
+    const parsed = manualResultSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      throw new HttpError(400, 'ফলাফলের তথ্য সঠিক নয়। পরীক্ষার নাম ও ফলাফল লিখুন।');
+    }
+
+    const referenceRange = parsed.data.referenceRange ? cleanText(parsed.data.referenceRange, 60) : null;
+    // The same deterministic comparison the extractor uses for values it
+    // read. No AI is involved, and an unreadable range yields `unknown`
+    // rather than a guess.
+    const status = compareToRange(
+      parseNumericValue(parsed.data.resultValue),
+      parseReferenceRange(referenceRange)
+    );
+
+    const created = await reportsRepo.insertManualReportResult(report.id, userId, {
+      testName: cleanText(parsed.data.testName, 160),
+      resultValue: cleanText(parsed.data.resultValue, 120),
+      unit: parsed.data.unit ? cleanText(parsed.data.unit, 40) : null,
+      referenceRange,
+      status,
+    });
+
+    await recordAudit({
+      userId,
+      action: 'report.result.manual',
+      resourceType: 'medical_report',
+      resourceId: report.id,
+    });
+
+    const results = await reportsRepo.listReportResults(report.id, userId);
+    return res.status(201).json({
+      result: created,
+      results,
+      notice:
+        status === 'unknown'
+          ? 'ফলাফলটি সংরক্ষণ করা হয়েছে। রিপোর্টে রেঞ্জ দেওয়া না থাকলে স্বাভাবিক-অস্বাভাবিক বিচার করা যায় না।'
+          : 'ফলাফলটি সংরক্ষণ করা হয়েছে। স্ট্যাটাসটি রিপোর্টে দেওয়া রেঞ্জের সাথে তুলনা করে নির্ণয় করা হয়েছে।',
+    });
   } catch (error) {
     return next(error);
   }

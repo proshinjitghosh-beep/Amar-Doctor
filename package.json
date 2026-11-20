@@ -12,6 +12,7 @@
     "dev": "node --watch backend/src/server.js",
     "test": "node --test backend/tests/*.test.js",
     "db:migrate": "node backend/src/utils/migrate.js",
+    "db:seed": "node backend/src/utils/seed.js",
     "reminders:dispatch": "node backend/src/utils/dispatch-reminders.js"
   },
   "dependencies": {

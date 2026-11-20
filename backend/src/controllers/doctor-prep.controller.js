@@ -18,6 +18,13 @@ const createSchema = z.object({
   language: z.enum(['bn', 'en']).optional(),
   answers: z.record(z.string(), z.any()).optional(),
   extraSymptoms: z.array(z.any()).optional(),
+  // The patient may decline to answer the follow-up questions. Without this
+  // flag an empty answer set would send the questions round again.
+  skip: z.boolean().optional(),
+  // A general preparation is not tied to one appointment. It matters because
+  // the appointment list is sorted newest-first, so an omitted appointment
+  // would otherwise silently attach the most recent - often a past - visit.
+  general: z.boolean().optional(),
 });
 
 /**
@@ -37,14 +44,18 @@ export async function createSummary(req, res, next) {
     const language = parsed.data.language === 'en' ? 'en' : 'bn';
     const answers = normaliseAnswers(parsed.data.answers || {});
     const extraSymptoms = normaliseExtraSymptoms(parsed.data.extraSymptoms || []);
+    const isGeneral = parsed.data.general === true;
 
     const context = await collectContext(userId, {
-      appointmentId: parsed.data.appointmentId ?? null,
+      appointmentId: isGeneral ? null : parsed.data.appointmentId ?? null,
       extraSymptoms,
+      general: isGeneral,
     });
 
     const questions = followUpQuestions(context);
-    const hasAnswers = Object.keys(answers).length > 0;
+    // `skip` means the patient chose not to answer; that is a decision, so
+    // the summary is built rather than the questions asked again.
+    const hasAnswers = Object.keys(answers).length > 0 || parsed.data.skip === true;
 
     // First pass returns the questions the patient still needs to answer.
     if (!hasAnswers && questions.length) {
@@ -53,6 +64,7 @@ export async function createSummary(req, res, next) {
         questions,
         context: {
           appointment: context.appointment,
+          general: isGeneral,
           symptomCount: context.symptoms.length,
           medicationCount: context.medications.length,
           reportCount: context.reports.length,
@@ -65,7 +77,7 @@ export async function createSummary(req, res, next) {
       summary = await generateSummary({ context, language, answers });
     } catch (error) {
       // The AI failed - fall back to a manual summary built from the records.
-      summary = buildManualSummary(context, language, answers);
+      summary = buildManualSummary(context, language, answers, extraSymptoms);
       const stored = await repo.insertVisitSummary(userId, {
         appointmentId: context.appointment?.id ?? null,
         summary,
@@ -101,26 +113,120 @@ export async function createSummary(req, res, next) {
   }
 }
 
-/** Build a summary straight from the records when the AI is unavailable. */
-function buildManualSummary(context, language, answers) {
+const SEVERITY_LABELS = {
+  bn: { mild: 'হালকা', moderate: 'মাঝারি', severe: 'তীব্র' },
+  en: { mild: 'mild', moderate: 'moderate', severe: 'severe' },
+};
+
+/**
+ * Render a calendar date in the reader's language.
+ *
+ * Three shapes reach this function: a Date (the database hands timestamps
+ * back as Date instances), a bare `YYYY-MM-DD`, and a full ISO timestamp.
+ * All three are calendar dates, so they are formatted in UTC to keep the day
+ * from shifting with the server's timezone.
+ */
+function formatDate(value, isBn) {
+  if (value === null || value === undefined || value === '') return value;
+
+  let date;
+  if (value instanceof Date) {
+    date = value;
+  } else {
+    const raw = String(value);
+    if (raw.length !== 10 || raw[4] !== '-' || raw[7] !== '-') {
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) return value;
+      date = parsed;
+    } else {
+      date = new Date(`${raw}T00:00:00Z`);
+    }
+  }
+
+  if (Number.isNaN(date.getTime())) return value;
+  try {
+    return new Intl.DateTimeFormat(isBn ? 'bn-BD' : 'en-GB', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone: 'UTC',
+    }).format(date);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * Build a summary straight from the records when the AI is unavailable.
+ *
+ * `extraSymptoms` are the symptoms the patient typed into the page just now.
+ * They are the patient's own account of why they came, so they are used for
+ * the main complaint - but they are never turned into a diagnosis.
+ */
+function buildManualSummary(context, language, answers, extraSymptoms = []) {
   const isBn = language !== 'en';
   const list = (items) => (items || []).filter(Boolean);
+  const severityLabels = SEVERITY_LABELS[isBn ? 'bn' : 'en'];
+
+  // The complaint is what the patient said first: their own answer to the
+  // follow-up question, or the symptom they recorded on the page. When the
+  // patient has recorded symptoms, the first one is their own account of why
+  // they came - so it is used rather than leaving the complaint blank.
+  const complaint =
+    answers.main_symptom ||
+    extraSymptoms.map((s) => s.description || s.name).find(Boolean) ||
+    context.symptoms.map((s) => s.name).find(Boolean) ||
+    null;
+
+  const symptomLines = list([
+    ...context.symptoms.map(
+      (s) => `${s.name}${s.severity ? ` (${severityLabels[s.severity] || s.severity})` : ''}`
+    ),
+    answers.main_symptom,
+  ]);
+
+  // The timeline comes from the patient's own dates and frequencies - both
+  // the ones recorded on the page and the ones given in the follow-up answers.
+  const startedLines = list([
+    ...context.symptoms
+      .filter((s) => s.startedAt)
+      .map((s) =>
+        isBn ? `শুরু: ${formatDate(s.startedAt, true)}` : `Started: ${formatDate(s.startedAt, false)}`
+      ),
+    ...extraSymptoms
+      .filter((s) => s.startedAt)
+      .map((s) =>
+        isBn ? `শুরু: ${formatDate(s.startedAt, true)}` : `Started: ${formatDate(s.startedAt, false)}`
+      ),
+    answers.symptom_start
+      ? (isBn ? `শুরু: ${formatDate(answers.symptom_start, true)}` : `Started: ${formatDate(answers.symptom_start, false)}`)
+      : null,
+  ]);
+
+  const frequencyLines = list([
+    ...context.symptoms
+      .filter((s) => s.frequency)
+      .map((s) => (isBn ? `ধারা: ${s.frequency}` : `Frequency: ${s.frequency}`)),
+    ...extraSymptoms
+      .filter((s) => s.frequency)
+      .map((s) => (isBn ? `ধারা: ${s.frequency}` : `Frequency: ${s.frequency}`)),
+    answers.symptom_frequency ? (isBn ? `ধারা: ${answers.symptom_frequency}` : `Frequency: ${answers.symptom_frequency}`) : null,
+  ]);
+
+  const timeline = list([...startedLines, ...frequencyLines]);
 
   return {
+    language,
     appointment_context: context.appointment,
+    // Attached by the server. The AI never saw the patient's name.
+    patient_context: context.patientContext || null,
     main_complaint:
-      answers.main_symptom ||
-      (isBn
-        ? 'রোগীর নিজের বক্তব্য অনুযায়ী ডাক্তারের পরামর্শের জন্য এসেছেন।'
-        : 'The patient is seeking medical advice.'),
-    symptoms: list([
-      ...context.symptoms.map((s) => `${s.name}${s.severity ? ` (${s.severity})` : ''}`),
-      answers.main_symptom,
-    ]),
-    symptom_timeline: list([
-      answers.symptom_start ? (isBn ? `শুরু: ${answers.symptom_start}` : `Started: ${answers.symptom_start}`) : null,
-      answers.symptom_frequency ? (isBn ? `ধারা: ${answers.symptom_frequency}` : `Frequency: ${answers.symptom_frequency}`) : null,
-    ]),
+      complaint ||
+      // The patient never said why they came. Saying so is honest; inventing
+      // a reason for the visit is not.
+      (isBn ? 'রোগীর নিজের বক্তব্য প্রয়োজন।' : 'The patient’s own account is needed.'),
+    symptoms: symptomLines,
+    symptom_timeline: timeline,
     medical_history: list([
       ...context.profile.medicalConditions.map((c) => (isBn ? `রোগ: ${c}` : `Condition: ${c}`)),
     ]),
@@ -129,21 +235,30 @@ function buildManualSummary(context, language, answers) {
         report.results.map(
           (result) =>
             `${report.reportName}: ${result.testName} ${result.resultValue}${result.unit ? ` ${result.unit}` : ''}` +
-            `${result.referenceRange ? ` (reference range ${result.referenceRange})` : ''}`
+            `${result.referenceRange ? (isBn ? ` (রেঞ্জ ${result.referenceRange})` : ` (reference range ${result.referenceRange})`) : ''}`
         )
       )
     ),
     current_medications: list(
-      context.medications.map((m) => `${m.name}${m.dosage ? ` ${m.dosage}` : ''}${m.instructions ? ` — ${m.instructions}` : ''}`)
+      context.medications.map(
+        (m) => `${m.label || m.name}${m.dosage ? ` ${m.dosage}` : ''}${m.instructions ? ` — ${m.instructions}` : ''}`
+      )
     ),
     allergies: list([...context.profile.allergies, answers.allergies]),
     previous_treatments: [],
     patient_questions: list([answers.patient_questions]),
-    missing_information: list(
+    missing_information: list([
+      ...(complaint
+        ? []
+        : [
+            isBn
+              ? 'রোগী কেন এসেছেন তা রোগীর নিজের বক্তব্য প্রয়োজন — বর্তমানে জানা যায়নি।'
+              : 'Why the patient is seeking care is not yet recorded — the patient’s own account is needed.',
+          ]),
       isBn
-        ? ['কিছু তথ্য AI দ্বারা যাচাই করা যায়নি; রোগীর নিজের বক্তব্য অনুযায়ী পূরণ করা হয়েছে।']
-        : ['Some details could not be verified by AI; they are filled in from the patient’s own account.']
-    ),
+        ? 'কিছু তথ্য AI দ্বারা যাচাই করা যায়নি; রোগীর নিজের বক্তব্য অনুযায়ী পূরণ করা হয়েছে।'
+        : 'Some details could not be verified by AI; they are filled in from the patient’s own account.',
+    ]),
     limitations: list([
       isBn
         ? 'এই সারাংশ স্বয়ংক্রিয়ভাবে তৈরি — চিকিৎসকের রোগ নির্ণয়ের বিকল্প নয়।'
@@ -175,8 +290,33 @@ export async function listSummaries(req, res, next) {
   }
 }
 
+/**
+ * The editable shape of a summary.
+ *
+ * This used to be `z.any()`, which accepted a bare string: the server stored
+ * it, answered 200 OK, and the doctor's PDF came out blank. The shape is
+ * checked now so a malformed edit is rejected instead of silently producing
+ * an empty summary.
+ */
+const editableSummarySchema = z
+  .object({
+    main_complaint: z.string().max(500).optional(),
+    symptoms: z.array(z.string().max(300)).max(30).optional(),
+    symptom_timeline: z.array(z.string().max(300)).max(20).optional(),
+    medical_history: z.array(z.string().max(300)).max(30).optional(),
+    relevant_reports: z.array(z.string().max(400)).max(30).optional(),
+    current_medications: z.array(z.string().max(300)).max(30).optional(),
+    allergies: z.array(z.string().max(200)).max(20).optional(),
+    previous_treatments: z.array(z.string().max(300)).max(20).optional(),
+    patient_questions: z.array(z.string().max(300)).max(20).optional(),
+    missing_information: z.array(z.string().max(300)).max(20).optional(),
+    limitations: z.array(z.string().max(300)).max(20).optional(),
+    language: z.enum(['bn', 'en']).optional(),
+  })
+  .passthrough();
+
 const editSchema = z.object({
-  summary: z.any().optional(),
+  summary: editableSummarySchema.optional(),
   summaryText: z.string().max(20000).optional(),
   status: z.enum(['draft', 'patient_confirmed', 'clinician_confirmed']).optional(),
 });
@@ -231,10 +371,17 @@ export async function regenerateSummary(req, res, next) {
     const context = await collectContext(userId, { appointmentId: existing.appointmentId });
 
     let summary;
+    let stage = 'ready';
+    let notice;
     try {
       summary = await generateSummary({ context, language });
     } catch (error) {
-      throw new HttpError(503, 'AI বিশ্লেষণ এখন উপলব্ধ নেই। আগের সারাংশটি সম্পাদনা করে ব্যবহার করতে পারেন।');
+      // The AI is unavailable. Creating a summary falls back to the records,
+      // so regenerating one must do the same rather than dead-ending the
+      // patient with a 503 and a stale summary.
+      summary = buildManualSummary(context, language, {});
+      stage = 'manual';
+      notice = 'AI বিশ্লেষণ এখন উপলব্ধ নেই। আপনার রেকর্ড থেকে সারাংশটি আবার তৈরি করা হয়েছে — নিজে সম্পাদনা করে নিন।';
     }
 
     const updated = await saveEditedSummary(userId, existing.id, {
@@ -243,7 +390,7 @@ export async function regenerateSummary(req, res, next) {
       status: 'draft',
     });
 
-    return res.json({ summary: updated });
+    return res.json({ summary: updated, stage, notice });
   } catch (error) {
     return next(error);
   }
@@ -377,7 +524,9 @@ export async function revokeShare(req, res, next) {
 /** Read a shared summary with its token. This is intentionally unauthenticated. */
 export async function viewShared(req, res, next) {
   try {
-    const token = String(req.query?.t || '').trim();
+    // The share link uses `?t=`; `token` is accepted as well so a copied
+    // API call works either way.
+    const token = String(req.query?.t || req.query?.token || '').trim();
     if (!token) {
       throw new HttpError(400, 'লিংকটি সঠিক নয়।');
     }

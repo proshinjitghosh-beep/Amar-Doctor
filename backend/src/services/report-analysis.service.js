@@ -1,13 +1,12 @@
 import { z } from 'zod';
 import { generateStructured } from './ai.service.js';
-import { REPORT_RESULT_STATUSES } from '../utils/medical-validation.js';
 
 /**
  * Schema for the AI's explanation of a report.
  *
  * The AI explains the rows we extracted; it never supplies the values. The
- * schema therefore has no field for a value, a unit or a reference range -
- * those come from the document itself.
+ * schema therefore has no field for a value, a unit, a reference range or a
+ * status - those come from the document itself and from our own comparison.
  */
 const analysisSchema = z.object({
   report_type: z.string().max(80).optional(),
@@ -16,7 +15,6 @@ const analysisSchema = z.object({
     .array(
       z.object({
         test_name: z.string().min(1).max(120),
-        status: z.enum(REPORT_RESULT_STATUSES),
         explanation: z.string().max(1200),
         requires_review: z.boolean(),
       })
@@ -29,17 +27,19 @@ const analysisSchema = z.object({
 
 const ANALYSIS_SYSTEM_PROMPT = `You explain medical laboratory reports to patients in Bangladesh.
 
-You receive a list of test results that were read directly from the patient's report document. Each result carries:
+You receive a list of test results taken from the patient's report. Each result carries:
 - test_name: the name printed on the report
 - result_value: the value printed on the report
 - unit: the unit printed on the report
 - reference_range: the reference range printed on the report (may be null)
 - status: a comparison against that printed range (normal, below_reference, above_reference, critical_high, critical_low, unknown)
+- source: either "extracted" - read out of the document by the app - or "manual" - the patient typed the value in by hand because the document could not be read
 
 Rules:
 - Explain each test in general, plain language: what it measures and what the printed value suggests.
 - Use the printed reference range. If reference_range is null, say that the report did not print a range and that a clinician must interpret the value - never supply a range of your own.
-- Keep the status exactly as given. Do not upgrade or downgrade it.
+- A result whose source is "manual" was NOT read from the document - the patient entered it. Say so plainly, and treat the value as the patient's own record of what the report said. Never claim to have read it from the document.
+- Do not change, upgrade or downgrade the status. Do not include a status in your answer.
 - Do not diagnose. Do not name a disease. Do not recommend a medicine, antibiotic, or dosage.
 - Do not suggest treatment. You may say which results a doctor should review.
 - When a result's requires_review is true, say plainly that the value needs to be confirmed.
@@ -54,7 +54,8 @@ function buildPrompt({ rows, language, reportType }) {
       (row) =>
         `- ${row.testName}: ${row.resultValue}${row.unit ? ` ${row.unit}` : ''}` +
         `${row.referenceRange ? ` (printed reference range: ${row.referenceRange})` : ' (no reference range printed on the report)'}` +
-        ` [status: ${row.status}${row.requiresReview ? ', requires confirmation' : ''}]`
+        ` [status: ${row.status}${row.requiresReview ? ', requires confirmation' : ''}` +
+        `${row.source === 'manual' ? ', entered by the patient by hand, not read from the document' : ''}]`
     )
     .join('\n');
 
@@ -71,7 +72,7 @@ ${readable || '- No test values could be read from this document.'}
 ${languageInstruction}
 
 Return a JSON object with: report_type, summary, results, important_observations, questions_for_doctor, limitations.
-The "results" array must contain one entry for each test result above, using the same test_name.`;
+The "results" array must contain one entry for each test result above, using the same test_name, with the keys test_name, explanation and requires_review.`;
 }
 
 /**
@@ -139,14 +140,15 @@ export async function answerQuestionAboutReport({ rows, question, language = 'bn
     .map(
       (row) =>
         `- ${row.testName}: ${row.resultValue}${row.unit ? ` ${row.unit}` : ''}` +
-        `${row.referenceRange ? ` (printed reference range: ${row.referenceRange})` : ' (no reference range printed on the report)'}`
+        `${row.referenceRange ? ` (printed reference range: ${row.referenceRange})` : ' (no reference range printed on the report)'}` +
+        `${row.source === 'manual' ? ' [entered by the patient by hand, not read from the document]' : ''}`
     )
     .join('\n');
 
   const languageInstruction =
     language === 'en' ? 'Answer in English.' : 'উত্তর দিন বাংলায়, প্রয়োজনে ইংরেজি চিকিৎসা-পরিভাষা ব্যবহার করে।';
 
-  const prompt = `The patient's report contains these results, read directly from the document:
+  const prompt = `The patient's report contains these results. Most were read directly from the document; any marked as entered by the patient by hand were not read from the document and are the patient's own record of what it said:
 ${readable || '- No results were extracted from this report.'}
 
 Patient question: ${question}

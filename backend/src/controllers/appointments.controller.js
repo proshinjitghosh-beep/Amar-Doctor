@@ -32,7 +32,9 @@ export async function createAppointment(req, res, next) {
     });
 
     if (!appointment) {
-      throw new HttpError(404, 'ডাক্তারটি পাওয়া যায়নি।');
+      // The app never creates a doctor from free text - that would fabricate
+      // a clinician identity, and a specialty nobody entered.
+      throw new HttpError(404, 'ডাক্তারটির প্রোফাইল পাওয়া যায়নি — ডাক্তারের তালিকা থেকে বুকিং করুন।');
     }
 
     await recordAudit({ userId: req.user.id, action: 'appointment.create', resourceType: 'appointment', resourceId: appointment.id });
