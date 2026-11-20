@@ -1,11 +1,30 @@
 
+/**
+ * A severity word that Bangla puts between the body part and the symptom:
+ * "বুকে প্রচণ্ড ব্যথা", "তীব্র ব্যথা", "ভয়ানক ব্যথা". Matching only the literal
+ * phrase "বুকে ব্যথা" missed every sentence where the patient (or the
+ * patient's family) qualified the pain, which is exactly how a serious
+ * complaint is usually written. The qualifier is therefore optional.
+ */
+const SEVERE = '(?:প্রচণ্ড|তীব্র|ভয়ানক|মারাত্মক|খুব|অনেক|বেশি)?';
+
 const EMERGENCY_PATTERNS = [
   /chest pain|severe chest pressure|can't breathe|cannot breathe|difficulty breathing|shortness of breath/i,
   /unconscious|not responding|seizure|stroke|face droop|slurred speech/i,
   /suicid|self[- ]harm|self harm|overdose|hurt myself|harm myself|kill myself|want to die|end my life|take my own life/i,
   /(heavy|severe|massive|uncontrolled|profuse)\s*bleeding|bleeding heavily/i,
-  /বুকে ব্যথা|তীব্র বুকের চাপ|শ্বাসকষ্ট|শ্বাস নিতে পারছি না|অজ্ঞান|খিঁচুনি|স্ট্রোক|প্রচুর রক্তপাত/i,
-  /আত্মহত্যা|আত্মহত্যার|রক্তক্ষরণ|নিজেকে ক্ষতি/i,
+  // বুকে ব্যথা, বুকে প্রচণ্ড ব্যথা, বুকে তীব্র চাপ, বুকব্যথা
+  new RegExp(`বুক(?:ে)?\\s*${SEVERE}\\s*(?:ব্যথা|চাপ)`),
+  // শ্বাসকষ্ট, শ্বাস কষ্ট, শ্বাস নিতে পারছি না, দম বন্ধ
+  /শ্বাস\s*কষ্ট|শ্বাস নিতে পারছি না|শ্বাস নিতে কষ্ট|শ্বাস ফুরিয়ে|দম বন্ধ|ফোঁসা ফাঁপসা|শ্বাস আটকে/i,
+  // অজ্ঞান, মূর্চিত, খিঁচুনি/খিচুনি, স্ট্রোক
+  /অজ্ঞান|মূর্চিত|খিঁচুনি|খিচুনি|স্ট্রোক|সাড়া দিচ্ছে না/i,
+  // পক্ষা দুর্বল, মুখ বাঁকা, কথা বলতে পারছি না
+  new RegExp(`(?:পক্ষা|হাত|পা)\\s*${SEVERE}\\s*(?:দুর্বল|লেগে|শক্তি)`),
+  /মুখ বাঁকা|কথা বলতে পারছি না|কথা বলা যাচ্ছে না/i,
+  // প্রচুর রক্তপাত, রক্তপাত হচ্ছে, রক্ত যাচ্ছে
+  new RegExp(`${SEVERE}\\s*রক্তপাত|রক্তপাত হচ্ছে|রক্ত যাচ্ছে|রক্তক্ষরণ`),
+  /আত্মহত্যা|আত্মহত্যার|নিজেকে ক্ষতি/i,
 ];
 
 export function hasEmergencyRedFlag(text = '') {

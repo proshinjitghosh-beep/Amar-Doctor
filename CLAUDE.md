@@ -28,7 +28,7 @@ proves nothing. Run them with the database named explicitly:
 TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/amar_doctor npm test
 ```
 
-and check the summary reports 73 passing and **0 skipped**.
+and check the summary reports 75 passing and **0 skipped**.
 
 ## Architecture
 
@@ -43,7 +43,7 @@ Request path: `backend/src/server.js` (listen + graceful shutdown) → `backend/
   - `ai.service.js` — the shared safety layer (`SAFETY_RULES`) plus `generateStructured()`, which forces the model to return JSON matching a zod schema, makes one repair attempt, and throws rather than returning a malformed reply.
 - The chat contract is load-bearing: the model is forced to return **JSON only** (`response_format`) shaped `{reply, sp, em}`, and `sp` is validated against a fixed specialist allowlist, falling back to `null`. Preserve it — the frontend renders `r.sp` as a booking button and `r.em` as the emergency style.
 - `services/report-analysis.service.js` forces a JSON schema that deliberately has **no field for a value, unit, reference range or status**. The AI can only explain values; it can never supply or change one. Status is always the server's own deterministic comparison against the range printed in the document.
-- `utils/triage.js` — keyword red-flag matcher (English + Bangla regexes) and the canned emergency reply that tells the user to call 999. This is a safety net only, not clinical triage (see `docs/SAFETY.md`).
+- `utils/triage.js` — keyword red-flag matcher (English + Bangla regexes) and the canned emergency reply that tells the user to call 999. The Bangla patterns allow an optional severity word between the body part and the symptom ("বুকে প্রচণ্ড ব্যথা"), because that is how a serious complaint is usually written. This is a safety net only, not clinical triage (see `docs/SAFETY.md`).
 - `utils/http-error.js` — `HttpError(status, message)`; `middleware/error-handler.js` converts it to JSON and logs only 5xx.
 - `config/env.js` — loads dotenv (skipped when `NODE_ENV=test`), clamps `GROQ_TIMEOUT_MS` (5k–120k) and `GROQ_MAX_RETRIES` (0–3), and **throws at boot in production if `GROQ_API_KEY` is missing**.
 - `config/database.js` — Postgres `Pool` created only when `DATABASE_URL` is set; `pool` is `null` otherwise and the whole app must keep working without a database.

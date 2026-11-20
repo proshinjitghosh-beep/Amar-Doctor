@@ -167,7 +167,7 @@ files can run in parallel without interfering.
 
 > **Read this before trusting a green run.** If neither `TEST_DATABASE_URL` nor `DATABASE_URL` is set, the
 > database-backed tests **skip** rather than fail, and `npm test` still exits 0. Always pass the variable above
-> and check the summary reports 73 passing and **0 skipped**.
+> and check the summary reports 75 passing and **0 skipped**.
 
 Run one file, or one test by name:
 
