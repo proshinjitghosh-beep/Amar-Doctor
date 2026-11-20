@@ -1,3 +1,4 @@
+import { CanvasFactory } from 'pdf-parse/worker';
 import { PDFParse } from 'pdf-parse';
 import { completeVisionJson } from './groq.service.js';
 import { HttpError } from '../utils/http-error.js';
@@ -36,7 +37,10 @@ const OCR_SCHEMA_HINT = `Return ONLY a valid JSON object shaped like:
 export async function extractPdfText(buffer) {
   let parser;
   try {
-    parser = new PDFParse({ data: new Uint8Array(buffer) });
+    parser = new PDFParse({
+      data: new Uint8Array(buffer),
+      CanvasFactory,
+    });
     const result = await parser.getText();
     return { text: (result?.text || '').trim(), pageCount: result?.total || 0 };
   } catch (error) {
@@ -50,7 +54,10 @@ export async function extractPdfText(buffer) {
 export async function renderPdfFirstPage(buffer, { scale = 1.5 } = {}) {
   let parser;
   try {
-    parser = new PDFParse({ data: new Uint8Array(buffer) });
+    parser = new PDFParse({
+      data: new Uint8Array(buffer),
+      CanvasFactory,
+    });
     const result = await parser.getScreenshot({ scale, first: 1, last: 1 });
     const page = result?.pages?.[0];
     if (!page?.data) return null;
