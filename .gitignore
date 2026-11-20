@@ -27,3 +27,12 @@ Thumbs.db
 uploads/
 .vscode/
 .idea/
+
+# Healthcare module scratch space (uploads are stored in PostgreSQL, not on disk)
+backend/storage/
+.vercel/
+*.pdf.tmp
+
+# Browser-automation scratch output
+.playwright-cli/
+

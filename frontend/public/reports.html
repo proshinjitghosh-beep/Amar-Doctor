@@ -1,0 +1,328 @@
+<!DOCTYPE html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>মেডিকেল রিপোর্ট বিশ্লেষণ</title><link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="css/style.css"></head><body>
+<main class="w">
+  <div class="sec"><span>০১</span><b>মেডিকেল রিপোর্ট</b></div>
+  <p class="mu" style="margin:-6px 0 16px;max-width:62ch">পরীক্ষার রিপোর্ট (PDF বা ছবি) আপলোড করুন। রিপোর্টের মানগুলো সরাসরি ফাইল থেকে পড়া হয় — AI শুধু সেগুলোর অর্থ বুঝিয়ে বলে। কোনো মান বানানো হয় না।</p>
+
+  <div id="gate"></div>
+
+  <div id="app" hidden>
+    <div class="drop" id="drop" role="button" tabindex="0" aria-label="রিপোর্ট ফাইল আপলোড করুন">
+      <b>রিপোর্ট ফাইল আপলোড করুন</b>
+      <small>PDF, JPG, PNG বা WebP — সর্বোচ্চ ৮ MB · ক্যামেরা দিয়েও তুলতে পারেন</small>
+      <input type="file" id="file" accept="application/pdf,image/jpeg,image/png,image/webp" hidden>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn o" id="cam" style="flex:1">ক্যামেরা দিয়ে ছবি তুলুন</button>
+      <input type="file" id="camfile" accept="image/*" capture="environment" hidden>
+    </div>
+    <div id="upmsg"></div>
+
+    <div class="sec"><span>০২</span><b>আপলোড করা রিপোর্ট</b></div>
+    <div id="list" class="g2"></div>
+  </div>
+</main>
+
+<dialog id="rd"><div id="rdb"></div><div class="row" style="margin-top:16px"><button class="btn o" onclick="rd.close()">বন্ধ</button></div></dialog>
+
+<script src="js/app.js"></script><script src="js/health.js"></script><script>
+const {esc,api,bnDate,bnDateTime,loading,empty,errorNote,gate}=H;
+const REPORT=new Map();
+let currentId=null;
+
+/* ------------------------------------------------------------- upload ---- */
+function setMsg(html){$('#upmsg').innerHTML=html}
+
+async function upload(file){
+  if(!file)return;
+  if(file.size>8*1024*1024){setMsg(errorNote('ফাইলটি ৮ MB এর বেশি হতে পারে না।'));return}
+  setMsg(`<div class="note">${loading('ফাইলটি পড়া হচ্ছে…')}</div>`);
+  const form=new FormData();form.append('file',file);
+  try{
+    const data=await api('POST','/api/reports/upload',form);
+    setMsg('');
+    toast('রিপোর্টটি যোগ হয়েছে');
+    await loadList();
+    openReport(data.report.id);
+  }catch(error){
+    setMsg(errorNote(error.message));
+  }
+}
+
+$('#drop').addEventListener('click',()=>$('#file').click());
+$('#drop').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')$('#file').click()});
+$('#file').addEventListener('change',e=>upload(e.target.files[0]));
+$('#cam').addEventListener('click',()=>$('#camfile').click());
+$('#camfile').addEventListener('change',e=>upload(e.target.files[0]));
+['dragenter','dragover'].forEach(t=>$('#drop').addEventListener(t,e=>{e.preventDefault();$('#drop').classList.add('over')}));
+['dragleave','drop'].forEach(t=>$('#drop').addEventListener(t,e=>{e.preventDefault();$('#drop').classList.remove('over')}));
+$('#drop').addEventListener('drop',e=>upload(e.dataTransfer.files[0]));
+
+/* --------------------------------------------------------------- list ---- */
+function statusPill(status){
+  const map={normal:['g','স্বাভাবিক'],below_reference:['r','রেঞ্জের নিচে'],above_reference:['r','রেঞ্জের উপরে'],
+    critical_high:['r','অত্যন্ত উচ্চ'],critical_low:['r','অত্যন্ত নিম্ন'],unknown:['a','অজানা']};
+  const [cls,label]=map[status]||['o','অজানা'];
+  return `<span class="pill ${cls}">${label}</span>`;
+}
+
+/** The server sends a machine-readable report type. Show it in Bangla. */
+const TYPE_BN={blood_test:'রক্ত পরীক্ষা',urine_test:'প্রস্রাব পরীক্ষা',xray:'এক্স-রে',ultrasound:'আল্ট্রাসাউন্ড',
+  ecg:'ইসিজি',bp:'রক্তচাপ',lipid:'লিপিড প্রোফাইল',cbc:'সিবিসি',unknown:'রিপোর্ট'};
+function typeLabel(type){
+  if(!type)return'';
+  return TYPE_BN[type]||String(type).replace(/_/g,' ');
+}
+
+/**
+ * The status of a report.
+ *
+ * Two different things are reported here: whether the values could be read
+ * out of the document, and whether the AI explained them. They are shown
+ * separately, because a PDF whose values were read successfully but whose
+ * AI explanation is still pending is not the same as a file that could not
+ * be read at all.
+ */
+function methodPill(report){
+  if(report.analysisStatus==='analyzed')return '<span class="pill g">বিশ্লেষণ সম্পন্ন</span>';
+  if(report.analysisStatus==='unavailable')return '<span class="pill a">AI অনুপলব্ধ</span>';
+  if(report.analysisStatus==='failed')return '<span class="pill r">বিশ্লেষণ ব্যর্থ</span>';
+  // Nothing could be read out of the file. This is not the same as "waiting"
+  // - the patient has to type the values in.
+  if(report.extractionMethod==='failed')return '<span class="pill r">পড়া যায়নি</span>';
+  // The values are in, but the AI has not explained them yet.
+  if(report.extractionMethod)return '<span class="pill o">মান পড়া হয়েছে</span>';
+  return '<span class="pill o">অপেক্ষমাণ</span>';
+}
+
+/**
+ * How the values in this report were obtained.
+ *
+ * `pdf_text` means the text layer of the PDF was read directly. `ocr` means
+ * a vision model read the image. `manual` means the patient typed the
+ * values in. `failed` means nothing could be read - and the reason is
+ * different for an image than for a PDF.
+ */
+function extractionNote(report){
+  const method=report.extractionMethod;
+  if(method==='pdf_text')return 'মানগুলো PDF থেকে সরাসরি পড়া হয়েছে।';
+  if(method==='ocr')return 'মানগুলো ছবি থেকে পড়া হয়েছে।';
+  if(method==='manual')return 'মানগুলো আপনি নিজে হাতে লিখেছেন।';
+  if(method==='failed')return 'ফাইল থেকে কোনো মান পড়া যায়নি।';
+  return '';
+}
+
+async function loadList(){
+  const box=$('#list');
+  box.innerHTML=loading('রিপোর্ট লোড হচ্ছে…');
+  try{
+    const data=await api('GET','/api/reports');
+    if(!data.reports.length){box.innerHTML=`<div class="sheet">${empty('এখনো কোনো রিপোর্ট নেই','উপরে থেকে প্রথম রিপোর্টটি আপলোড করুন','◫')}</div>`;return}
+    box.innerHTML=data.reports.map(r=>`
+      <div class="sheet">
+        <div class="sheet-h"><b>${esc(r.fileName)}</b><small>${esc(bnDate(r.createdAt))}</small></div>
+        <div class="sheet-b tight"><div class="row" style="align-items:center;gap:6px;flex-wrap:wrap">
+        ${methodPill(r)}${r.reportType?`<span class="pill o">${esc(typeLabel(r.reportType))}</span>`:''}</div>
+        <p class="mu" style="margin:8px 0 0;font-size:13px">${(r.byteSize/1024).toFixed(0)} KB${r.extractionMethod==='manual'?' · নিজে লেখা মান':''}</p>
+        <button class="btn o" style="width:100%;margin-top:10px" data-open="${r.id}">দেখুন</button></div>
+      </div>`).join('');
+    box.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openReport(b.dataset.open));
+  }catch(error){
+    box.innerHTML=errorNote(error.message);
+  }
+}
+
+/* ------------------------------------------------------------- detail ---- */
+async function openReport(id){
+  currentId=id;
+  $('#rdb').innerHTML=loading();
+  rd.showModal();
+  try{
+    const data=await api('GET','/api/reports/'+id);
+    REPORT.set(id,data);
+    renderDetail(data);
+  }catch(error){
+    $('#rdb').innerHTML=errorNote(error.message);
+  }
+}
+
+function renderDetail({report,results}){
+  const rows=results||[];
+  const confirmed=rows.filter(r=>r.verificationStatus==='patient_confirmed'||r.verificationStatus==='clinician_confirmed').length;
+  const analysis=report.analysis;
+  const note=extractionNote(report);
+
+  /* When nothing could be read, say why instead of showing an empty table. */
+  const nothingRead=!rows.length&&(report.extractionMethod==='failed'||report.extractionMethod===null);
+  const failedHtml=nothingRead
+    ?`<div class="note warn"><b>ফাইল থেকে কোনো মান পড়া যায়নি</b>
+        ${report.mimeType==='application/pdf'
+          ?'এই PDF-এর লেখা পড়া যায়নি। স্ক্যান করা ছবি হলে ছবি থেকে লেখা পড়ার ফিচারটি কনফিগার করা হয়নি।'
+          :'ছবি থেকে লেখা পড়ার ফিচারটি কনফিগার করা হয়নি। আপনি নিজে রিপোর্টের মানগুলো হাতে লিখে দিতে পারেন।'}
+        <br>নিচে <b>ফলাফল হাতে লিখুন</b> চেপে মানগুলো লিখুন।</div>`
+    :'';
+
+  const body=`
+  <div class="sec" style="margin-top:0"><span>রিপোর্ট</span><b>${esc(report.fileName)}</b></div>
+  <div class="hscroll" style="margin-bottom:12px">
+    ${methodPill(report)}
+    ${report.reportType?`<span class="pill o">${esc(typeLabel(report.reportType))}</span>`:''}
+    <span class="pill o">${esc(bnDate(report.createdAt))}</span>
+    ${confirmed?`<span class="pill g">${confirmed}টি মান যাচাই করা</span>`:''}
+  </div>
+  ${note?`<div class="note" style="margin-bottom:12px">${esc(note)}</div>`:''}
+  ${failedHtml}
+
+  <div id="results">${rows.length?`<div class="lab">${rows.map(r=>rowHtml(r)).join('')}</div>`:empty('কোনো টেস্টের মান পড়া যায়নি','উপরের ব্যাখ্যা দেখুন, অথবা মানগুলো নিজে লিখুন','◫')}</div>
+
+  <div class="row" style="margin-top:12px">
+    <button class="btn o" id="analyse" style="flex:1">AI বিশ্লেষণ করুন</button>
+    <a class="btn o" id="dl" href="/api/reports/${report.id}/download" download>ফাইল নামান</a>
+  </div>
+  <button class="btn o" id="manual" style="width:100%;margin-top:8px">✍️ ফলাফল হাতে লিখুন</button>
+  <div id="ans" style="margin-top:12px"></div>
+  <div id="aiout" style="margin-top:12px">${analysis?analysisHtml(analysis):''}</div>
+  ${rows.length?`<button class="btn" id="confirm" style="width:100%;margin-top:10px">আমি মানগুলো যাচাই করেছি</button>`:''}
+  <div class="row" style="margin-top:8px"><button class="btn o" id="del" style="flex:1;color:var(--r)">রিপোর্ট মুছে ফেলুন</button></div>`;
+
+  $('#rdb').innerHTML=body;
+
+  $('#analyse').onclick=async()=>{
+    $('#analyse').disabled=true;
+    $('#aiout').innerHTML=`<div class="note">${loading('AI রিপোর্টটি পড়ছে…')}</div>`;
+    try{
+      const data=await api('POST','/api/reports/'+report.id+'/analyze',{language:'bn'});
+      REPORT.set(report.id,data);renderDetail(data);
+    }catch(error){
+      // The AI is the only part that can be missing. The values read out of
+      // the document are already on screen, so the note says so instead of
+      // pretending the whole analysis failed.
+      const aiMissing=error.status===503;
+      $('#aiout').innerHTML=aiMissing
+        ?`<div class="note warn"><b>AI বিশ্লেষণ এখন উপলব্ধ নেই</b>
+           রিপোর্টের মানগুলো নিচে সরাসরি দেখানো হয়েছে — সেগুলো ফাইল থেকেই পড়া, কোনো মান বানানো হয়নি।
+           <br>AI চালু হলে একই রিপোর্টে আবার চেষ্টা করুন।</div>`
+        :errorNote(error.message+' — রিপোর্টের মানগুলো নিচে দেখা যাচ্ছে, AI বিশ্লেষণের জন্য পরে আবার চেষ্টা করুন।');
+      $('#analyse').disabled=false;
+    }
+  };
+
+  const confirmBtn=$('#confirm');
+  if(confirmBtn)confirmBtn.onclick=async()=>{
+    confirmBtn.disabled=true;
+    try{
+      await api('PATCH','/api/reports/'+report.id+'/results',{results:rows.map(r=>({id:r.id,status:r.status}))});
+      toast('মানগুলো যাচাই করা হয়েছে');
+      await loadList();await openReport(report.id);
+    }catch(error){toast(error.message);confirmBtn.disabled=false}
+  };
+
+  const manual=$('#manual');
+  if(manual)manual.onclick=()=>openManual(report);
+
+  $('#del').onclick=async()=>{
+    if(!confirm('রিপোর্টটি মুছে ফেলবেন?'))return;
+    try{await api('DELETE','/api/reports/'+report.id);rd.close();toast('রিপোর্ট মুছে ফেলা হয়েছে');await loadList()}catch(error){toast(error.message)}
+  };
+
+  askBox(report,rows);
+}
+
+function rowHtml(r){
+  const cls=r.status==='normal'?'ok':(r.status==='unknown'?'none':(r.status==='above_reference'?'high':'low'));
+  const bar=r.status==='normal'?'<i style="width:100%"></i>':r.status==='unknown'?'<i class="none" style="width:12%"></i>':'<i class="'+(r.status==='above_reference'?'high':'low')+'" style="width:72%"></i>';
+  const stamp=r.verificationStatus==='patient_confirmed'||r.verificationStatus==='clinician_confirmed'
+    ?'<span class="stamp">যাচাই করা</span>'
+    :(r.verificationStatus==='needs_review'?'<span class="stamp wait">যাচাই দরকার</span>':'');
+  // A value the patient typed in is labelled as such, so it is never read as
+  // something the app pulled out of the document.
+  const source=r.source==='manual'?'<span class="pill o">নিজে লেখা</span>':'';
+  return `<div class="lab-r">
+    <div class="t">${esc(r.testName)} ${stamp} ${source}</div>
+    <div class="v ${cls}">${esc(r.resultValue||'—')}<span class="u">${esc(r.unit||'')}</span></div>
+    ${r.referenceRange?`<div class="rg">রেঞ্জ ${esc(r.referenceRange)}</div>`:'<div class="rg">রিপোর্টে রেঞ্জ দেওয়া নেই</div>'}
+    <div class="bar-l">${bar}</div>
+    ${r.explanation?`<div class="x">${esc(r.explanation)}</div>`:''}
+  </div>`;
+}
+
+/* ------------------------------------------------------- manual entry ----
+   The path for a report the server could not read. The patient supplies the
+   value and, if their report prints one, the reference range. The server
+   decides the status from that range - the browser never sends a
+   normal/abnormal judgement.                                       */
+function openManual(report){
+  const box=$('#mdb');
+  box.innerHTML=`<div class="sec" style="margin-top:0"><span>হাতে লেখা</span><b>ফলাফল লিখুন</b></div>
+    <div class="note" style="margin-bottom:12px"><b>নিজে লিখা যাবে</b>আপনার রিপোর্টে যা লেখা আছে সেটুকুই লিখুন। রেঞ্জ দিলে সার্ভার সেই রেঞ্জের সাথে তুলনা করে স্ট্যাটাস বের করবে — রেঞ্জ না দিলে স্ট্যাটাস "অজানা" থাকবে। কোনো মান বানানো হয় না।</div>
+    <div class="kv" style="gap:9px">
+      <input id="mt" placeholder="পরীক্ষার নাম (যেমন: হিমোগ্লোবিন)" required>
+      <div class="row"><input id="mv" placeholder="মান (যেমন: 12.4)" required><input id="mu" placeholder="একক (যেমন: g/dL)"></div>
+      <input id="mrg" placeholder="রেঞ্জ (যেমন: 12-16) — রিপোর্টে থাকলে">
+    </div>
+    <div id="merr" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:12px"><button class="btn o" id="mcancel">বাতিল</button><button class="btn" id="msave" style="flex:1">সংরক্ষণ করুন</button></div>`;
+
+  $('#mcancel').onclick=()=>{
+    // Go back to the report rather than closing the dialog.
+    const cached=REPORT.get(report.id);
+    if(cached)renderDetail(cached);else rd.close();
+  };
+  $('#msave').onclick=async()=>{
+    const btn=$('#msave');
+    btn.disabled=true;
+    try{
+      const data=await api('POST','/api/reports/'+report.id+'/results',{
+        testName:$('#mt').value.trim(),
+        resultValue:$('#mv').value.trim(),
+        unit:$('#mu').value.trim()||undefined,
+        referenceRange:$('#mrg').value.trim()||undefined,
+      });
+      toast('ফলাফল সংরক্ষণ হয়েছে');
+      if(data.notice)toast(data.notice);
+      rd.close();
+      await loadList();
+      await openReport(report.id);
+    }catch(error){$('#merr').innerHTML=errorNote(error.message);btn.disabled=false}
+  };
+}
+
+function analysisHtml(a){
+  return `<div class="sheet"><div class="sheet-h"><b>AI বিশ্লেষণ</b><small>${esc(a.report_type||'')}</small></div><div class="sheet-b">
+    <p style="margin-top:0">${esc(a.summary||'')}</p>
+    ${a.important_observations&&a.important_observations.length?`<b style="font-size:14px">লক্ষণীয় বিষয়</b><ul style="margin:6px 0 0;padding-left:20px">${a.important_observations.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
+    ${a.questions_for_doctor&&a.questions_for_doctor.length?`<b style="font-size:14px;display:block;margin-top:12px">ডাক্তারকে জিজ্ঞেস করতে পারেন</b><ul style="margin:6px 0 0;padding-left:20px">${a.questions_for_doctor.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:''}
+    ${a.limitations&&a.limitations.length?`<div class="note warn" style="margin-top:12px"><b>সীমাবদ্ধতা</b>${a.limitations.map(esc).join('<br>')}</div>`:''}
+    <div class="note" style="margin-top:12px">এটি সাধারণ তথ্য — রোগ নির্ণয় নয়। চিকিৎসকের পরামর্শের বিকল্প নয়।</div>
+  </div></div>`;
+}
+
+/* ---------------------------------------------------------- ask the AI --- */
+function askBox(report,rows){
+  if(!rows.length)return;
+  $('#ans').innerHTML=`<div class="sheet"><div class="sheet-h"><b>এই রিপোর্ট নিয়ে প্রশ্ন করুন</b></div><div class="sheet-b">
+    <div class="row"><input id="q" placeholder="যেমন: হিমোগ্লোবিন কম হলে কী হয়?"><button class="btn" id="ask">প্রশ্ন করুন</button></div>
+    <div id="aout" style="margin-top:10px"></div></div></div>`;
+  const send=async()=>{
+    const question=$('#q').value.trim();
+    if(!question){toast('প্রশ্নটি লিখুন');return}
+    $('#aout').innerHTML=loading('উত্তর দেওয়া হচ্ছে…');
+    try{
+      const data=await api('POST','/api/reports/'+report.id+'/ask',{question,language:'bn'});
+      $('#aout').innerHTML=`<div class="note ok"><b>উত্তর</b><div style="white-space:pre-wrap">${esc(data.answer)}</div></div>`;
+    }catch(error){$('#aout').innerHTML=errorNote(error.message)}
+  };
+  $('#ask').onclick=send;
+  $('#q').addEventListener('keydown',e=>{if(e.key==='Enter')send()});
+}
+
+/* --------------------------------------------------------------- boot ---- */
+H.ready(async()=>{
+  if(!H.isSignedIn()){
+    gate($('#gate'),{title:'অ্যাকাউন্ট লাগবে',hint:'আপনার রিপোর্ট আপনার নিজের কাছে সংরক্ষিত থাকে, তাই একটি অ্যাকাউন্ট প্রয়োজন।',onSignedIn:()=>{location.reload()}});
+    $('#gate').hidden=false;
+    return;
+  }
+  $('#app').hidden=false;
+  await loadList();
+});
+</script></body></html>

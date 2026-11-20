@@ -1,0 +1,407 @@
+<!DOCTYPE html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>ডাক্তারের সাথে দেখার প্রস্তুতি</title><link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="css/style.css"></head><body>
+<main class="w">
+  <div class="sec"><span>০১</span><b>ভিজিট প্রস্তুতি</b></div>
+  <p class="mu" style="margin:-6px 0 16px;max-width:64ch">ডাক্তারের কাছে যাওয়ার আগে নিজের লক্ষণ, ওষুধ ও রিপোর্টগুলো এক জায়গায় গুছিয়ে নিন। সব তথ্য আপনার নিজের অ্যাকাউন্ট থেকে আসে — কিছু বানানো হয় না।</p>
+
+  <div id="gate"></div>
+
+  <div id="app" hidden>
+    <div class="sec"><span>০২</span><b>নিজের লক্ষণ ও উদ্বেগ লিখুন</b></div>
+    <div class="sheet"><div class="sheet-b">
+      <p class="mu" style="margin-top:0">যা লিখবেন তা-ই ডাক্তারকে দেখানো হবে। এখানে যা লিখবেন না, তা সারাংশে যাবে না।</p>
+      <textarea id="symptom" rows="3" placeholder="যেমন: তিন দিন ধরে মাথাব্যথা, সকালে বেশি বাড়ে"></textarea>
+      <div class="row" style="margin-top:9px">
+        <select id="severity" style="max-width:150px">
+          <option value="mild">হালকা</option>
+          <option value="moderate" selected>মাঝারি</option>
+          <option value="severe">তীব্র</option>
+        </select>
+        <input id="since" type="date">
+      </div>
+      <textarea id="concern" rows="2" style="margin-top:9px" placeholder="ডাক্তারের কাছে আপনার উদ্বেগ — যেমন: ঔষধ বদলাবো না বদলাবো?"></textarea>
+      <button class="btn" id="addsym" style="width:100%;margin-top:10px">＋ লক্ষণ যোগ করুন</button>
+      <div id="symmsg" style="margin-top:8px"></div>
+      <div id="symlist" style="margin-top:10px"></div>
+    </div></div>
+
+    <div class="sec"><span>০৩</span><b>কোন দেখার জন্য প্রস্তুতি?</b></div>
+    <div class="sheet"><div class="sheet-b" id="appts"></div></div>
+
+    <div class="sec"><span>০৪</span><b>প্রস্তুতির খসড়া</b></div>
+    <div id="summary"></div>
+  </div>
+</main>
+
+<dialog id="sd" aria-labelledby="sdtitle"><div id="sdb"></div><div class="row noprint" style="margin-top:16px"><button class="btn o" id="sdc">বন্ধ</button></div></dialog>
+
+<script src="js/app.js"></script><script src="js/health.js"></script><script>
+const {esc,api,bnDateTime,loading,empty,errorNote,gate}=H;
+let SUMMARY=null;
+
+/* ---------------------------------------------------------- symptoms ----
+   A symptom the patient writes here is saved as a symptom in their own
+   health record, so it also reaches the summary when it is regenerated
+   later. The server keeps it as a patient-reported fact - it never turns it
+   into a diagnosis.                                                        */
+let SYMPTOMS=[];
+
+const SEVERITY_BN={mild:'হালকা',moderate:'মাঝারি',severe:'তীব্র'};
+
+function renderSymptoms(){
+  const box=$('#symlist');
+  if(!SYMPTOMS.length){box.innerHTML='';return}
+  box.innerHTML=`<div class="lab">${SYMPTOMS.map((s,i)=>`<div class="lab-r">
+    <div class="t">${esc(s.symptomName)}</div>
+    <div class="v">${esc(SEVERITY_BN[s.severity]||s.severity)}</div>
+    ${s.startedAt?`<div class="rg">শুরু: ${esc(bnDateTime(s.startedAt))}</div>`:''}
+    ${s.description?`<div class="x">${esc(s.description)}</div>`:''}
+    <div style="grid-column:1/-1"><button class="btn o" data-rmsym="${s.id}" style="width:100%;margin-top:6px;padding:6px 12px;font-size:13px">✕ সরান</button></div>
+  </div>`).join('')}</div>`;
+  box.querySelectorAll('[data-rmsym]').forEach(b=>b.onclick=async()=>{
+    const id=b.dataset.rmsym;
+    SYMPTOMS=SYMPTOMS.filter(s=>String(s.id)!==String(id));
+    renderSymptoms();
+    // It is also removed from the health record, so it does not come back
+    // the next time the summary is generated.
+    try{await api('DELETE','/api/health-profile/symptoms/'+id)}catch(error){toast(error.message)}
+  });
+}
+
+$('#addsym').onclick=async()=>{
+  const name=$('#symptom').value.trim();
+  const concern=$('#concern').value.trim();
+  if(!name&&!concern){$('#symmsg').innerHTML=errorNote('অন্তত একটি লক্ষণ বা উদ্বেগ লিখুন।');return}
+  $('#symmsg').innerHTML='';
+  const btn=$('#addsym');
+  btn.disabled=true;
+  try{
+    if(name){
+      const data=await api('POST','/api/health-profile/symptoms',{
+        symptomName:name,
+        description:concern||undefined,
+        severity:$('#severity').value,
+        startedAt:$('#since').value?`${$('#since').value}T00:00:00.000Z`:undefined,
+      });
+      SYMPTOMS.unshift(data.symptom);
+    }
+    $('#symptom').value='';$('#concern').value='';$('#since').value='';
+    renderSymptoms();
+    toast('লক্ষণ যোগ হয়েছে');
+  }catch(error){$('#symmsg').innerHTML=errorNote(error.message)}
+  btn.disabled=false;
+};
+
+/** Load the symptoms already on the patient's record. */
+async function loadSymptoms(){
+  try{
+    const data=await api('GET','/api/health-profile/symptoms');
+    SYMPTOMS=data.symptoms||[];
+    renderSymptoms();
+  }catch(error){/* the list simply stays empty */}
+}
+
+/* -------------------------------------------------------- appointments --- */
+async function loadAppts(){
+  const box=$('#appts');
+  box.innerHTML=loading();
+  try{
+    const data=await api('GET','/api/appointments');
+    const server=data.appointments||[];
+    // The browser's own bookings are shown too, so the patient always sees
+    // what they just made - including one the server has not accepted yet.
+    // A booking the server did accept already appears in the list above.
+    const local=LS.g('appts',[]);
+    const onlyLocal=local.filter(l=>!l.synced);
+
+    const general=`<div class="row" style="padding:11px 0;border-bottom:1px dashed var(--ln);align-items:center;gap:10px">
+      <div><b>সাধারণ প্রস্তুতি</b><div class="mu" style="font-size:12.5px">নির্দিষ্ট কোনো ডাক্তার ছাড়াই — শুধু আপনার লক্ষণ ও ওষুধ নিয়ে</div></div>
+      <button class="btn" data-prep-general style="margin-left:auto;padding:8px 14px;font-size:13px">তৈরি করুন</button></div>`;
+
+    if(!server.length&&!onlyLocal.length){
+      box.innerHTML=general+empty('কোনো অ্যাপয়েন্টমেন্ট নেই','ডাক্তারের পাতা থেকে অ্যাপয়েন্টমেন্ট নিন','◷');
+    }else{
+      box.innerHTML=general+
+        server.map(a=>`<div class="row" style="padding:11px 0;border-bottom:1px dashed var(--ln);align-items:center;gap:10px">
+          <div><b>${esc(a.doctorName)}</b><div class="mu" style="font-size:12.5px">${esc(a.specialty||'')} · ${esc(bnDateTime(a.scheduledAt))}</div></div>
+          <button class="btn" data-prep="${a.id}" style="margin-left:auto;padding:8px 14px;font-size:13px">প্রস্তুতি করুন</button></div>`).join('')+
+        onlyLocal.map(l=>`<div class="row" style="padding:11px 0;border-bottom:1px dashed var(--ln);align-items:center;gap:10px">
+          <div><b>${esc(l.doc)}</b><div class="mu" style="font-size:12.5px">${esc(l.sp||'')} · ${esc(l.slot||'')}</div></div>
+          <span class="pill a" style="margin-left:auto">সার্ভারে সেভ হয়নি</span>
+          <button class="btn o" data-sync="${l.id}" style="padding:8px 12px;font-size:13px">সেভ করুন</button>
+          <button class="btn" data-prep-local="${l.id}" style="padding:8px 14px;font-size:13px">প্রস্তুতি করুন</button></div>`).join('');
+    }
+
+    box.querySelectorAll('[data-prep]').forEach(b=>b.onclick=()=>prepare({appointmentId:Number(b.dataset.prep)}));
+    box.querySelectorAll('[data-prep-general]').forEach(b=>b.onclick=()=>prepare({general:true}));
+    box.querySelectorAll('[data-sync]').forEach(b=>b.onclick=()=>syncLocal(b.dataset.sync));
+    box.querySelectorAll('[data-prep-local]').forEach(b=>b.onclick=()=>prepareLocal(b.dataset.prepLocal));
+  }catch(error){box.innerHTML=errorNote(error.message)}
+}
+
+/**
+ * Save a booking the server did not accept.
+ *
+ * The booking was made while signed out, so it only exists in the browser.
+ * Once the patient signs in it can be written to the database, which is what
+ * the visit-preparation module reads.
+ */
+async function syncLocal(localId){
+  const appointment=await syncBooking(Number(localId));
+  if(appointment){toast('সার্ভারে সেভ হয়েছে');await loadAppts();}
+  else toast('সেভ করা যায়নি — অ্যাকাউন্টে সাইন ইন করে আবার চেষ্টা করুন');
+}
+
+/** Prepare from a booking that only exists in the browser. */
+async function prepareLocal(localId){
+  const appointment=await syncBooking(Number(localId));
+  if(!appointment){toast('বুকিংটি সার্ভারে সেভ করা যায়নি — অ্যাকাউন্টে সাইন ইন করে আবার চেষ্টা করুন');return}
+  await loadAppts();
+  prepare({appointmentId:Number(appointment.id)});
+}
+
+/* ------------------------------------------------------------ prepare --- */
+async function prepare({appointmentId=null,general=false}={}){
+  const box=$('#summary');
+  box.innerHTML=`<div class="sheet"><div class="sheet-b">${loading('আপনার তথ্য জোগাড় করা হচ্ছে…')}</div></div>`;
+  try{
+    const data=await api('POST','/api/doctor-prep/create',{appointmentId,general,language:'bn'});
+    if(data.stage==='questions'){renderQuestions(data,{appointmentId,general});return}
+    showSummary(data);
+  }catch(error){
+    box.innerHTML=`<div class="sheet"><div class="sheet-b">${errorNote(error.message)}</div></div>`;
+  }
+}
+
+/** Render a generated or hand-built summary. */
+function showSummary(data){
+  const id=data.summaryId;
+  SUMMARY={summaryId:id,summary:data.summary};
+  const manual=data.stage==='manual';
+  const ctx=data.summary&&data.summary.appointment_context;
+  $('#summary').innerHTML=`<div class="sheet"><div class="sheet-h"><b>প্রস্তুতির খসড়া</b>
+    <small>${manual?'AI অনুপলব্ধ ছিল না':esc(ctx&&ctx.doctorName?ctx.doctorName:'সাধারণ প্রস্তুতি')}</small></div>
+    <div class="sheet-b">${summaryHtml(data.summary)}
+    ${manual?`<div class="note warn" style="margin-top:12px"><b>AI ছিল না</b>নিচের খসড়াটি আপনার নিজের তথ্য থেকে সাজানো — কোনো কিছু বানানো হয়নি। আপনি নিজে সম্পাদনা করতে পারেন।</div>`:''}
+    <div class="row noprint" style="margin-top:14px"><button class="btn o" id="editsum" style="flex:1">সম্পাদনা করুন</button>
+    <button class="btn o" id="regen">আবার তৈরি করুন</button>
+    <button class="btn" id="approvesum">অনুমোদন দিন</button></div></div></div>`;
+  wireSummary(data.summary,id);
+}
+
+function renderQuestions(data,target){
+  const box=$('#summary');
+  // A question is either free text, a date, or a choice with optional
+  // Bangla labels for each option value.
+  const field=q=>{
+    if(q.type==='text')return `<textarea rows="2" data-ans="${esc(q.key)}" placeholder="জানা নেই লিখলেও চলবে"></textarea>`;
+    if(q.type==='date')return `<input type="date" data-ans="${esc(q.key)}">`;
+    const labels=q.labels||{};
+    return `<select data-ans="${esc(q.key)}"><option value="">জানা নেই</option>${(q.options||[]).map(o=>`<option value="${esc(o)}">${esc(labels[o]||o)}</option>`).join('')}</select>`;
+  };
+  box.innerHTML=`<div class="sheet"><div class="sheet-h"><b>আরও কিছু জানা দরকার</b><small>যেকোনো প্রশ্ন বাদ দেওয়া যায়</small></div>
+    <div class="sheet-b"><div class="kv" style="gap:10px" id="qbox">${data.questions.map(q=>`
+      <label style="font-size:13.5px;color:var(--mu)">${esc(q.question)}</label>
+      ${field(q)}`).join('')}</div>
+      <div class="row noprint" style="margin-top:14px"><button class="btn o" id="skipall" style="flex:1">সব বাদ দিন</button>
+      <button class="btn" id="continue" style="flex:1">সাথে সাথে তৈরি করুন</button></div></div></div>`;
+
+  $('#skipall').onclick=()=>submit(target,{},true);
+  $('#continue').onclick=()=>{
+    const answers={};
+    document.querySelectorAll('[data-ans]').forEach(el=>{if(el.value.trim())answers[el.dataset.ans]=el.value.trim()});
+    // "Create now" means the patient does not want to answer anything else,
+    // so the remaining questions are skipped rather than asked again.
+    submit(target,answers,true);
+  };
+}
+
+async function submit(target,answers,skip){
+  const box=$('#summary');
+  box.innerHTML=`<div class="sheet"><div class="sheet-b">${loading('সারাংশ তৈরি হচ্ছে…')}</div></div>`;
+  try{
+    const data=await api('POST','/api/doctor-prep/create',{
+      appointmentId:target.appointmentId,
+      general:Boolean(target.general),
+      language:'bn',
+      answers,
+      skip:Boolean(skip)
+    });
+    // The server asks the follow-up questions again when there is nothing to
+    // go on with. That must never be rendered as an empty summary.
+    if(data.stage==='questions'){renderQuestions(data,target);return}
+    showSummary(data);
+  }catch(error){box.innerHTML=`<div class="sheet"><div class="sheet-b">${errorNote(error.message)}</div></div>`}
+}
+
+/* ----------------------------------------------------------- rendering --- */
+function summaryHtml(s){
+  if(!s)return empty('কোনো সারাংশ নেই');
+  const row=(k,v)=>`<div class="row2"><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`;
+  const bullets=list=>list&&list.length
+    ?`<ul style="margin:0;padding-left:18px">${list.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`
+    :'<span class="mu">নেই</span>';
+  return `<div class="sum">
+    ${row('অভিযোগ',esc(s.main_complaint||'—'))}
+    ${row('লক্ষণ',bullets(s.symptoms))}
+    ${row('সময়রেখা',bullets(s.symptom_timeline))}
+    ${row('পূর্ব ইতিহাস',bullets(s.medical_history))}
+    ${row('প্রযোজ্য রিপোর্ট',bullets(s.relevant_reports))}
+    ${row('বর্তমান ওষুধ',bullets(s.current_medications))}
+    ${row('অ্যালার্জি',bullets(s.allergies))}
+    ${row('রোগীর প্রশ্ন',bullets(s.patient_questions))}
+    ${row('অনুপলব্ধ তথ্য',bullets(s.missing_information))}
+    ${s.limitations&&s.limitations.length?`<div class="row2"><div class="k">সীমাবদ্ধতা</div><div class="v"><div class="note warn">${s.limitations.map(esc).join('<br>')}</div></div></div>`:''}
+  </div>`;
+}
+
+function wireSummary(summary,id){
+  const editsum=$('#editsum');
+  if(editsum)editsum.onclick=()=>editSummary(summary,id);
+
+  const regen=$('#regen');
+  if(regen)regen.onclick=async()=>{
+    regen.disabled=true;
+    try{
+      const data=await api('POST','/api/doctor-prep/'+id+'/regenerate',{language:'bn'});
+      toast(data.stage==='manual'?'AI অনুপলব্ধ ছিল না — রেকর্ড থেকে আবার তৈরি হয়েছে':'আবার তৈরি হয়েছে');
+      await refresh(id);
+    }catch(error){toast(error.message);regen.disabled=false}
+  };
+
+  const approve=$('#approvesum');
+  if(approve)approve.onclick=async()=>{
+    approve.disabled=true;
+    try{await api('POST','/api/doctor-prep/'+id+'/approve',{});toast('অনুমোদন দেওয়া হয়েছে');await refresh(id)}
+    catch(error){toast(error.message);approve.disabled=false}
+  };
+
+  const prints=$('#prints');
+  if(prints)prints.onclick=()=>window.open('/api/doctor-prep/'+id+'/export','_blank');
+
+  const shares=$('#shares');
+  if(shares)shares.onclick=async()=>{
+    const box=$('#shout');
+    box.innerHTML=loading('লিংক তৈরি হচ্ছে…');
+    try{
+      const data=await api('POST','/api/doctor-prep/'+id+'/share',{});
+      // The stored token is a hash, so the full URL is only available at the
+      // moment the link is created. It is shown as a real, clickable link.
+      const url=location.origin+(data.link&&data.link.url?data.link.url:'');
+      box.innerHTML=`<div class="note ok"><b>শেয়ার লিংক তৈরি হয়েছে</b>
+        <a href="${esc(url)}" target="_blank" rel="noopener" style="display:block;word-break:break-all;margin-top:6px;color:var(--ink);text-decoration:underline">${esc(url)}</a>
+        <button class="btn o" id="copyl" style="width:100%;margin-top:8px">লিংক কপি করুন</button>
+        <div class="mu" style="font-size:12px;margin-top:6px">লিংকটি একবারই দেখা যায় — এখনই কপি করে রাখুন। যে কেউ লিংকটি পাবে, সে এই সারাংশটি পড়তে পারবে।</div></div>`;
+      $('#copyl').onclick=async()=>{try{await navigator.clipboard.writeText(url);toast('কপি হয়েছে')}catch(e){toast('লিংকটি কপি করা যায়নি')}};
+      await refresh(id);
+    }catch(error){box.innerHTML=errorNote(error.message)}
+  };
+}
+
+function editSummary(summary,id){
+  const FIELDS=[
+    ['main_complaint','অভিযোগ','text'],
+    ['symptoms','লক্ষণ','lines'],
+    ['symptom_timeline','সময়রেখা','lines'],
+    ['medical_history','পূর্ব ইতিহাস','lines'],
+    ['relevant_reports','প্রযোজ্য রিপোর্ট','lines'],
+    ['current_medications','বর্তমান ওষুধ','lines'],
+    ['allergies','অ্যালার্জি','lines'],
+    ['patient_questions','রোগীর প্রশ্ন','lines'],
+  ];
+  $('#sdb').innerHTML=`<div class="sec" style="margin-top:0"><span>সম্পাদনা</span><b id="sdtitle">প্রস্তুতির খসড়া</b></div>
+    <div class="kv" style="gap:12px">${FIELDS.map(([key,label,kind])=>
+      `<label style="font-size:13px;color:var(--mu)">${esc(label)}</label>
+       ${kind==='text'?`<textarea rows="2" data-f="${key}" data-kind="text">${esc(summary?.[key]||'')}</textarea>`
+        :`<textarea rows="2" data-f="${key}" data-kind="lines" placeholder="প্রতিটি লাইনে একটি">${esc((summary?.[key]||[]).join('\n'))}</textarea>`}`).join('')}</div>
+    <p class="mu" style="font-size:12.5px">আপনার লেখা যেমন থাকবে তেমনই ডাক্তার পাবেন।</p>
+    <div id="eerr" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:12px"><button class="btn o" id="edcancel">বাতিল</button><button class="btn" id="saveedit" style="flex:1">সংরক্ষণ করুন</button></div>`;
+  sd.showModal();
+  $('#edcancel').onclick=()=>sd.close();
+  $('#saveedit').onclick=async()=>{
+    // Only the fields on this form change. Everything else the summary
+    // carried - the limitations, the provenance, the appointment context -
+    // is kept, so editing can never quietly drop a safety note.
+    const next={...summary};
+    document.querySelectorAll('[data-f]').forEach(el=>{
+      const key=el.dataset.f;
+      const raw=el.value.trim();
+      // Whether a field holds one line or many is declared by the markup,
+      // not guessed from the placeholder text.
+      const isList=el.dataset.kind==='lines';
+      next[key]=raw?(isList?raw.split('\n').map(x=>x.trim()).filter(Boolean):raw):(key==='main_complaint'?'':[]);
+    });
+    try{
+      await api('PUT','/api/doctor-prep/'+id,{summary:next});
+      sd.close();toast('সংরক্ষণ হয়েছে');
+      await refresh(id);
+    }catch(error){$('#eerr').innerHTML=errorNote(error.message)}
+  };
+}
+
+/** Re-read a stored summary and re-render it. */
+async function refresh(id){
+  try{
+    const data=await api('GET','/api/doctor-prep/'+id);
+    const record=data.summary;
+    const summary=record.summary;
+    SUMMARY={summaryId:id,summary};
+    const links=data.shareLinks||[];
+    const approved=record.status==='patient_confirmed';
+    $('#summary').innerHTML=`<div class="sheet"><div class="sheet-h"><b>প্রস্তুতির খসড়া</b>
+      <small>${approved?'<span class="stamp">রোগী অনুমোদিত</span>':''}</small></div>
+      <div class="sheet-b">${summaryHtml(summary)}
+      <div class="row noprint" style="margin-top:14px"><button class="btn o" id="editsum" style="flex:1">সম্পাদনা করুন</button>
+      <button class="btn o" id="regen">আবার তৈরি করুন</button>
+      ${approved?`<button class="btn" id="prints">প্রিন্ট / PDF</button><button class="btn" id="shares">শেয়ার</button>`:'<button class="btn" id="approvesum">অনুমোদন দিন</button>'}</div>
+      <div id="shout" style="margin-top:10px"></div>
+      ${links.length?`<div class="sec" style="margin-top:22px"><span>লিংক</span><b>আগের শেয়ার লিংক</b></div>
+        <div class="note">${links.map(l=>`<div style="padding:7px 0;border-bottom:1px dashed var(--ln)">
+          <div style="display:flex;gap:8px;align-items:center">
+            <span class="pill ${l.revokedAt?'r':'o'}">${l.revokedAt?'বাতিল করা হয়েছে':(new Date(l.expiresAt)<new Date()?'মেয়াদ শেষ':'সক্রিয়')}</span>
+            <span class="mu" style="font-size:12.5px">${l.recipientName?esc(l.recipientName)+' · ':''}তৈরি ${esc(bnDateTime(l.createdAt))}</span>
+            ${l.revokedAt?'':`<button class="btn o" data-revoke="${l.id}" style="margin-left:auto;padding:5px 10px;font-size:12px">বাতিল করুন</button>`}
+          </div></div>`).join('')}</div>`:''}
+      </div></div>`;
+    wireSummary(summary,id);
+    $('#summary').querySelectorAll('[data-revoke]').forEach(b=>b.onclick=async()=>{
+      try{await api('POST','/api/doctor-prep/'+id+'/revoke-share/'+b.dataset.revoke,{});toast('লিংক বাতিল করা হয়েছে');await refresh(id)}
+      catch(error){toast(error.message)}
+    });
+  }catch(error){toast(error.message)}
+}
+
+/* ------------------------------------------------------ earlier drafts --- */
+async function loadSummaries(){
+  let data;
+  try{
+    data=await api('GET','/api/doctor-prep');
+  }catch(error){return}
+  const list=data.summaries||[];
+  if(!list.length)return;
+
+  const box=$('#summary');
+  const past=`<div class="sheet" style="margin-bottom:14px"><div class="sheet-h"><b>আগের সারাংশ</b><small>${list.length}</small></div>
+    <div class="sheet-b tight">${list.map(x=>`<div class="row" style="padding:9px 0;border-bottom:1px dashed var(--ln);align-items:center;gap:10px">
+      <div><b style="font-size:14px">${esc(x.summary&&x.summary.main_complaint||'সারাংশ')}</b>
+      <div class="mu" style="font-size:12.5px">${esc(bnDateTime(x.createdAt))} · ${x.status==='patient_confirmed'?'রোগী অনুমোদিত':'খসড়া'}</div></div>
+      <button class="btn o" data-open-sum="${x.id}" style="margin-left:auto;padding:8px 14px;font-size:13px">খুলুন</button></div>`).join('')}</div></div>`;
+
+  if(!box.innerHTML.trim())await refresh(list[0].id);
+  box.insertAdjacentHTML('afterbegin',past);
+  box.querySelectorAll('[data-open-sum]').forEach(b=>b.onclick=()=>refresh(b.dataset.openSum));
+}
+
+/* --------------------------------------------------------------- boot ---- */
+H.ready(async()=>{
+  if(!H.isSignedIn()){
+    gate($('#gate'),{title:'অ্যাকাউন্ট লাগবে',hint:'সারাংশ তৈরি করতে আপনার লক্ষণ, ওষুধ ও রিপোর্ট দরকার — সেগুলো আপনার অ্যাকাউন্টে আছে।',onSignedIn:()=>location.reload()});
+    return;
+  }
+  $('#app').hidden=false;
+  await loadSymptoms();
+  await loadAppts();
+  await loadSummaries();
+});
+$('#sdc').onclick=()=>sd.close();
+</script></body></html>

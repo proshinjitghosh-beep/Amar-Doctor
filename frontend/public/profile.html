@@ -1,5 +1,102 @@
-<!DOCTYPE html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>প্রোফাইল</title><link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="css/style.css"></head><body><main class="w" style="max-width:640px"><h2>👤 আমার প্রোফাইল</h2><div class="card"><form id="f" style="display:grid;gap:12px"><input id="n" placeholder="নাম *" required><div class="row"><input id="a" type="number" placeholder="বয়স *" required><select id="g"><option>পুরুষ</option><option>নারী</option><option>অন্যান্য</option></select></div><div class="row"><input id="h" type="number" placeholder="উচ্চতা (cm)"><input id="w" type="number" placeholder="ওজন (kg)"></div><select id="bg"><option value="">রক্তের গ্রুপ</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>O+</option><option>O-</option><option>AB+</option><option>AB-</option></select><input id="al" placeholder="ওষুধে অ্যালার্জি"><input id="cd" placeholder="দীর্ঘমেয়াদি রোগ (যেমন ডায়াবেটিস)"><button class="btn">সংরক্ষণ করুন</button></form><button class="btn o" id="out" style="width:100%;margin-top:10px">লগআউট</button></div>
-</main><script src="js/app.js"></script><script>
-const U=LS.g('user',{}),ids=['n','a','g','h','w','bg','al','cd'];ids.forEach(i=>U[i]&&($('#'+i).value=U[i]));
-$('#f').onsubmit=e=>{e.preventDefault();const u={...U};ids.forEach(i=>u[i]=$('#'+i).value);u.name=u.n;LS.s('user',u);toast('✅ প্রোফাইল সংরক্ষিত');setTimeout(()=>location='dashboard.html',900)};
-$('#out').onclick=()=>{localStorage.removeItem('user');location='login.html'}</script></body></html>
+<!DOCTYPE html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>প্রোফাইল</title><link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="css/style.css"></head><body><main class="w" style="max-width:640px"><h2>👤 আমার প্রোফাইল</h2>
+
+<div id="gate"></div>
+
+<div id="app" hidden>
+<div class="card"><form id="f" style="display:grid;gap:12px"><input id="n" placeholder="নাম *" required><div class="row"><input id="a" type="number" min="0" max="120" placeholder="বয়স *" required><select id="g"><option value="">লিঙ্গ</option><option value="male">পুরুষ</option><option value="female">নারী</option><option value="other">অন্যান্য</option></select></div><div class="row"><input id="h" type="number" placeholder="উচ্চতা (cm)"><input id="w" type="number" placeholder="ওজন (kg)"></div><select id="bg"><option value="">রক্তের গ্রুপ</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>O+</option><option>O-</option><option>AB+</option><option>AB-</option></select><input id="al" placeholder="ওষুধে অ্যালার্জি (একাধিক হলে কমা দিন)"><input id="cd" placeholder="দীর্ঘমেয়াদি রোগ (যেমন ডায়াবেটিস)"><button class="btn">সংরক্ষণ করুন</button></form><button class="btn o" id="out" style="width:100%;margin-top:10px">লগআউট</button></div>
+<div class="note" style="margin-top:12px"><b>কী হয় না</b>এখানে যা লিখবেন তা আপনার অ্যাকাউন্টে সংরক্ষিত থাকে এবং ভিজিট প্রস্তুতির সময় ব্যবহার হয়। অ্যাপ কোনো রক্তের গ্রুপ, অ্যালার্জি বা রোগ আপনার হয়ে বের করে দেয় না — সবকিছু আপনিই লিখছেন।</div>
+</div>
+</div>
+</main><script src="js/app.js"></script><script src="js/health.js"></script><script>
+const {esc,api,gate,loading,errorNote}=H;
+
+/*
+ * The profile is the patient's own health profile on the server, not a copy
+ * in the browser's local storage. Signing out therefore has to revoke the
+ * session - otherwise the cookie stays valid for the rest of its lifetime.
+ */
+
+/** Age -> an approximate date of birth, because the server stores a date. */
+function ageToDob(age){
+  const n=Number(age);
+  if(!Number.isFinite(n)||n<0||n>120)return null;
+  const year=new Date().getFullYear()-n;
+  return `${year}-01-01`;
+}
+
+function dobToAge(dob){
+  if(!dob)return '';
+  const d=new Date(dob);
+  if(Number.isNaN(d.getTime()))return '';
+  const now=new Date();
+  let age=now.getFullYear()-d.getFullYear();
+  const m=now.getMonth()-d.getMonth();
+  if(m<0||(m===0&&now.getDate()<d.getDate()))age--;
+  return age>0?String(age):'';
+}
+
+function fill(profile){
+  if(!profile)return;
+  $('#n').value=profile.fullName||'';
+  $('#a').value=dobToAge(profile.dateOfBirth);
+  $('#g').value=profile.sex||'';
+  $('#h').value=profile.heightCm==null?'':profile.heightCm;
+  $('#w').value=profile.weightKg==null?'':profile.weightKg;
+  $('#bg').value=profile.bloodGroup||'';
+  $('#al').value=(profile.allergies||[]).join(', ');
+  $('#cd').value=(profile.medicalConditions||[]).join(', ');
+}
+
+H.ready(async()=>{
+  if(!H.isSignedIn()){
+    gate($('#gate'),{title:'অ্যাকাউন্ট লাগবে',hint:'আপনার প্রোফাইল আপনার নিজের অ্যাকাউন্টে সংরক্ষিত থাকে।',onSignedIn:()=>location.reload()});
+    return;
+  }
+  $('#app').hidden=false;
+  try{
+    const me=await H.loadMe();
+    if(me&&me.fullName&&!$('#n').value)$('#n').value=me.fullName;
+  }catch(e){}
+  try{
+    const data=await api('GET','/api/health-profile');
+    fill(data.profile);
+  }catch(error){
+    $('#gate').hidden=false;
+    $('#gate').innerHTML=errorNote(error.message);
+  }
+});
+
+$('#f').onsubmit=async e=>{
+  e.preventDefault();
+  const btn=$('#f').querySelector('button');
+  btn.disabled=true;
+  try{
+    const payload={
+      fullName:$('#n').value.trim(),
+      sex:$('#g').value||undefined,
+      bloodGroup:$('#bg').value||undefined,
+      heightCm:$('#h').value?Number($('#h').value):undefined,
+      weightKg:$('#w').value?Number($('#w').value):undefined,
+      allergies:$('#al').value.trim(),
+      medicalConditions:$('#cd').value.trim(),
+    };
+    const dob=ageToDob($('#a').value);
+    if(dob)payload.dateOfBirth=dob;
+    await api('PUT','/api/health-profile',payload);
+    toast('প্রোফাইল সংরক্ষিত হয়েছে');
+  }catch(error){toast(error.message)}
+  btn.disabled=false;
+};
+
+$('#out').onclick=async()=>{
+  const btn=$('#out');
+  btn.disabled=true;
+  try{
+    // Revoke the server session first - clearing the browser alone would leave
+    // a valid session behind.
+    await api('POST','/api/auth/logout');
+  }catch(error){/* the cookie is cleared either way */}
+  localStorage.removeItem('user');
+  location='login.html';
+};
+</script></body></html>

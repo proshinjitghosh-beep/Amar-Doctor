@@ -1,0 +1,40 @@
+<!DOCTYPE html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>ভিজিট প্রস্তুতি</title><link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="css/style.css"></head><body>
+<main class="w" style="max-width:720px">
+  <div class="sec"><span>ভিজিট</span><b>ডাক্তারের সাথে দেখার প্রস্তুতি</b></div>
+  <div id="out"><div class="sheet"><div class="sheet-b"><div class="load"><span class="dots"><span></span><span></span><span></span></span> লোড হচ্ছে…</div></div></div></div>
+</main>
+<script src="js/app.js"></script><script src="js/health.js"></script><script>
+const {esc,bnDateTime,loading,errorNote}=H;
+const token=new URLSearchParams(location.search).get('t');
+
+function render(s){
+  const row=(k,v)=>`<div class="row2"><div class="k">${esc(k)}</div><div class="v">${v}</div></div>`;
+  const bullets=list=>list&&list.length
+    ?`<ul style="margin:0;padding-left:18px">${list.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`
+    :'<span class="mu">নেই</span>';
+  $('#out').innerHTML=`<div class="sheet"><div class="sheet-h"><b>${esc(s.appointment_context?.doctorName||'ডাক্তারের সাথে দেখা')}</b>
+    <small>${s.appointment_context?.scheduledAt?esc(bnDateTime(s.appointment_context.scheduledAt)):''}</small></div>
+    <div class="sheet-b"><div class="sum">
+      ${row('অভিযোগ',esc(s.main_complaint||'—'))}
+      ${row('লক্ষণ',bullets(s.symptoms))}
+      ${row('সময়রেখা',bullets(s.symptom_timeline))}
+      ${row('পূর্ব ইতিহাস',bullets(s.medical_history))}
+      ${row('প্রযোজ্য রিপোর্ট',bullets(s.relevant_reports))}
+      ${row('বর্তমান ওষুধ',bullets(s.current_medications))}
+      ${row('অ্যালার্জি',bullets(s.allergies))}
+      ${row('রোগীর প্রশ্ন',bullets(s.patient_questions))}
+    </div>
+    <div class="note" style="margin-top:14px">এই সারাংশটি রোগী নিজে যাচাই করেছেন। এটি সাধারণ তথ্য — রোগ নির্ণয় নয়।</div>
+    </div></div>`;
+}
+
+(async()=>{
+  if(!token){$('#out').innerHTML=`<div class="sheet"><div class="sheet-b">${errorNote('লিংকটি সঠিক নয়।')}</div></div>`;return}
+  try{
+    const data=await H.api('GET','/api/shared?token='+encodeURIComponent(token));
+    render(data.summary||{});
+  }catch(error){
+    $('#out').innerHTML=`<div class="sheet"><div class="sheet-b">${errorNote(error.message)}</div></div>`;
+  }
+})();
+</script></body></html>

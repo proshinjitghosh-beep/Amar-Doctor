@@ -1,7 +1,94 @@
-<!DOCTYPE html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>ড্যাশবোর্ড</title><link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="css/style.css"></head><body><main class="w"><h2 id="hi0">📋 আমার ড্যাশবোর্ড</h2><div class="g"><div class="card"><b>আসন্ন অ্যাপয়েন্টমেন্ট</b><div id="a" style="margin-top:10px"></div></div>
-<div class="card"><b>⚖️ BMI ক্যালকুলেটর</b><div class="row" style="margin:10px 0"><input id="h" type="number" placeholder="উচ্চতা cm"><input id="w" type="number" placeholder="ওজন kg"></div><button class="btn" id="bm">হিসাব করুন</button><p id="br" class="ok"></p></div>
-<div class="card"><b>🧠 AI কনসাল্ট ইতিহাস</b><div id="hi" class="mu" style="margin-top:10px"></div></div></div></main><script src="js/app.js"></script><script>
-if(U0&&U0.name)$('#hi0').textContent='👋 '+U0.name+', আপনার ড্যাশবোর্ড';const A=LS.g('appts',[]);$('#a').innerHTML=A.length?'':'<span class="mu">কোনো অ্যাপয়েন্টমেন্ট নেই। <a href="doctors.html" class="hl">বুক করুন →</a></span>';
-A.forEach(x=>{const e=document.createElement('div');e.style.cssText='padding:8px 0;border-top:1px solid var(--ln)';e.innerHTML=`<b>${x.doc}</b><br><span class="mu">${x.sp} · ${x.slot}</span> `;e.insertAdjacentHTML('beforeend',x.paid?'<span class="ok">✓ পেইড</span> <a class="chip" href="records.html">💊 প্রেসক্রিপশন</a>':'<a class="chip on" href="payment.html?a='+x.id+'">💳 পেমেন্ট করুন</a>');$('#a').append(e)});
-const H=LS.g('hist',[]);$('#hi').innerHTML=H.length?H.slice(-5).reverse().map(x=>'• '+x.x.replace(/</g,'&lt;')).join('<br>'):'এখনো কিছু নেই';
-$('#bm').onclick=()=>{const m=$('#h').value/100,b=$('#w').value/(m*m);if(!(b>0&&b<80))return toast('সঠিক সংখ্যা দিন');$('#br').textContent=`BMI ${b.toFixed(1)}: `+(b<18.5?'কম ওজন':b<23?'স্বাভাবিক':b<27.5?'অতিরিক্ত ওজন':'স্থূলতা')+' (এশিয়ান মান)'}</script></body></html>
+<!DOCTYPE html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>ড্যাশবোর্ড</title><link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="css/style.css"></head><body>
+<main class="w">
+  <div class="sec" style="margin-top:14px"><span>ড্যাশবোর্ড</span><b id="hi0">আমার ড্যাশবোর্ড</b></div>
+
+  <div class="g2" id="quick"></div>
+
+  <div class="sec"><span>স্বাস্থ্য</span><b>আমার স্বাস্থ্য টুলস</b></div>
+  <div class="g2" id="tools"></div>
+  <p class="mu" style="font-size:13px;margin-top:14px">এই চারটি টুলের জন্য একটি অ্যাকাউন্ট লাগবে — রিপোর্ট, ওষুধ ও জরুরি তথ্য আপনার নিজের কাছে সংরক্ষিত থাকে।</p>
+
+  <div class="sec"><span>ডাক্তার</span><b>আসন্ন অ্যাপয়েন্টমেন্ট</b></div>
+  <div class="sheet"><div class="sheet-b" id="a"></div></div>
+
+  <div class="sec"><span>হিসাব</span><b>BMI ক্যালকুলেটর</b></div>
+  <div class="sheet"><div class="sheet-b">
+    <p class="mu" style="margin-top:0;font-size:13px">শুধু হিসাব করার জন্য — এটি কোনো রোগ নির্ণয় নয়।</p>
+    <div class="row"><input id="h" type="number" placeholder="উচ্চতা cm" aria-label="উচ্চতা সেন্টিমিটার"><input id="w" type="number" placeholder="ওজন kg" aria-label="ওজন কিলোগ্রাম"></div>
+    <button class="btn" id="bm" style="margin-top:9px">হিসাব করুন</button>
+    <p id="br" class="ok" style="margin:10px 0 0"></p>
+  </div></div>
+
+  <div class="sec"><span>ইতিহাস</span><b>AI কনসাল্ট ইতিহাস</b></div>
+  <div class="sheet"><div class="sheet-b" id="hi"></div></div>
+</main>
+<script src="js/app.js"></script><script src="js/health.js"></script><script>
+const {esc,api,bnDateTime,loading,empty,errorNote}=H;
+
+/* The greeting follows the real session when there is one, and the demo
+   user stored in the browser otherwise. `U0` is already declared in app.js. */
+if(U0&&U0.name)$('#hi0').textContent=U0.name+', আমার ড্যাশবোর্ড';
+
+/* The four healthcare modules, with an honest one-line summary of each. */
+const TOOLS=[
+  ['reports.html','রিপোর্ট বিশ্লেষণ','পরীক্ষার রিপোর্ট আপলোড করে মানগুলো বুঝে নিন','📄'],
+  ['medications.html','ওষুধের রিমাইন্ডার','সময়মতো ওষুধ খাওয়ার সিডিউল','💊'],
+  ['emergency.html','জরুরি সহায়তা','৯৯৯ এ কল ও পরিবারের জন্য বার্তা তৈরি করুন','🚨'],
+  ['doctor-prep.html','ভিজিট প্রস্তুতি','ডাক্তারের কাছে যাওয়ার আগের সারাংশ','🗒️'],
+];
+$('#tools').innerHTML=TOOLS.map(t=>`<a class="sheet" href="${t[0]}" style="display:block">
+  <div class="sheet-h"><b>${t[3]} ${esc(t[1])}</b></div>
+  <div class="sheet-b tight"><p class="mu" style="margin:0;font-size:13.5px">${esc(t[2])}</p></div>
+</a>`).join('');
+
+/* Shortcuts to the two things a patient does most often. */
+$('#quick').innerHTML=`
+  <a class="sheet" href="consult.html" style="display:block"><div class="sheet-h"><b>💬 AI ডাক্তার</b></div><div class="sheet-b tight"><p class="mu" style="margin:0;font-size:13.5px">লক্ষণ বলুন — জরুরি অবস্থা আগে যাচাই হবে</p></div></a>
+  <a class="sheet" href="emergency.html" style="display:block"><div class="sheet-h"><b>🚨 ৯৯৯ এ কল</b></div><div class="sheet-b tight"><p class="mu" style="margin:0;font-size:13.5px">জরুরি অবস্থায় সরাসরি কল — ইন্টারনেট লাগে না</p></div></a>`;
+
+/* Appointments. The browser's own bookings are shown first so the patient
+   always sees what they just made; the server's list follows. */
+function renderAppts(local,server){
+  const box=$('#a');
+  const rows=[];
+  if(local.length){
+    rows.push(local.map(x=>`<div class="row" style="padding:9px 0;border-bottom:1px dashed var(--ln);align-items:center;gap:9px">
+      <div><b>${esc(x.doc)}</b><div class="mu" style="font-size:12.5px">${esc(x.sp||'')} · ${esc(x.slot||'')}</div></div>
+      ${x.paid?'<span class="pill g" style="margin-left:auto">পেইড</span>':'<span class="pill a" style="margin-left:auto">পেমেন্ট বাকি</span>'}
+    </div>`).join(''));
+  }
+  if(server.length){
+    rows.push(server.map(x=>`<div class="row" style="padding:9px 0;border-bottom:1px dashed var(--ln);align-items:center;gap:9px">
+      <div><b>${esc(x.doctorName)}</b><div class="mu" style="font-size:12.5px">${esc(x.specialty||'')} · ${esc(bnDateTime(x.scheduledAt))}</div></div>
+      <a class="btn o" href="doctor-prep.html" style="margin-left:auto;padding:6px 12px;font-size:13px">প্রস্তুতি</a>
+    </div>`).join(''));
+  }
+  box.innerHTML=rows.length?rows.join(''):empty('কোনো অ্যাপয়েন্টমেন্ট নেই','ডাক্তারের পাতা থেকে বুক করুন','◷');
+}
+
+async function loadAppts(){
+  const local=LS.g('appts',[]);
+  renderAppts(local,[]);
+  try{
+    const data=await api('GET','/api/appointments');
+    renderAppts(local.filter(l=>!l.synced),data.appointments||[]);
+  }catch(error){
+    // Signed out or no database: the browser's own bookings still show.
+    renderAppts(local,[]);
+  }
+}
+
+/* The chat history is kept in the browser by the consult page. */
+const HIST=LS.g('hist',[]);
+$('#hi').innerHTML=HIST.length
+  ?HIST.slice(-5).reverse().map(x=>'<div style="padding:7px 0;border-bottom:1px dashed var(--ln)">'+esc(x.x).replace(/\n/g,'<br>')+'</div>').join('')
+  :empty('এখনো কোনো কনসাল্ট নেই','AI ডাক্তারের সাথে কথা বললে এখানে দেখা যাবে','💬');
+
+$('#bm').onclick=()=>{
+  const m=$('#h').value/100,b=$('#w').value/(m*m);
+  if(!(b>0&&b<80))return toast('সঠিক সংখ্যা দিন');
+  $('#br').textContent=`BMI ${b.toFixed(1)}: `+(b<18.5?'কম ওজন':b<23?'স্বাভাবিক':b<27.5?'অতিরিক্ত ওজন':'স্থূলতা')+' (এশিয়ান মান)';
+};
+
+loadAppts();
+</script></body></html>

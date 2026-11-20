@@ -10,5 +10,11 @@
       "src": "/(.*)",
       "dest": "/api/index.js"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/internal/reminders/dispatch",
+      "schedule": "0 6 * * *"
+    }
   ]
 }

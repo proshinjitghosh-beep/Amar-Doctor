@@ -1,9 +1,15 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { apiLimiter } from '../middleware/rate-limiters.js';
 
 const router = Router();
 const rooms = new Map();
 const signalSchema = z.object({ from: z.string().max(80), data: z.unknown() });
+
+// The relay is unauthenticated - it is an orphaned prototype - but it is
+// still rate limited so it cannot be used to fill memory or to read a room
+// at speed. See the README's limitations for the bigger caveat.
+router.use(apiLimiter);
 
 router.post('/:roomId', (req, res) => {
   const roomId = req.params.roomId.slice(0, 40);

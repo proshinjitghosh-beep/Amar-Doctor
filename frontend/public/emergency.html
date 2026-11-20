@@ -1,0 +1,323 @@
+<!DOCTYPE html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>জরুরি সহায়তা</title><link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="css/style.css"></head><body class="emg">
+<main class="w">
+  <div class="sec"><span>০১</span><b>জরুরি সহায়তা</b></div>
+
+  <!-- The call buttons are plain tel: links. They never wait for the network,
+       the database or the AI. -->
+  <div class="g2" style="margin-bottom:18px">
+    <a class="call" href="tel:999"><span class="ic">✚</span>জরুরি সেবা<small class="mu">অ্যাম্বুলেন্স · ফায়ার · পুলিশ</small><b>999</b></a>
+    <a class="call" href="tel:999"><span class="ic">☎</span>সরাসরি কল করুন<b>999</b></a>
+  </div>
+
+  <div style="text-align:center;margin:6px 0 10px">
+    <button class="sos" id="sos">SOS<small>চাপলে জরুরি সহায়তা চালু হবে</small></button>
+  </div>
+  <p class="mu" style="text-align:center;font-size:13px;margin:0 0 20px">নিচে বাংলাদেশের জরুরি নম্বর <b class="fig" style="font-size:17px;color:var(--bg)">৯৯৯</b>। এটি ফোনের সাধারণ কল — ইন্টারনেট লাগে না।</p>
+
+  <div id="activated" hidden></div>
+
+  <div class="sec"><span>০২</span><b>জরুরি প্রোফাইল</b></div>
+  <div class="sheet"><div class="sheet-b" id="profile">
+    <div id="gate"></div>
+    <div id="pbody" hidden>
+      <p class="mu" style="margin-top:0">রক্তের গ্রুপ, অ্যালার্জি ও রোগ — সবগুলো আপনি নিজে লিখেছেন। কেউ এগুলো নিজে থেকে যোগ করে না।</p>
+      <div class="row" style="margin-top:10px">
+        <select id="bg" style="max-width:130px"><option value="">রক্তের গ্রুপ</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option><option>O+</option><option>O-</option></select>
+        <input id="al" placeholder="অ্যালার্জি (কমা দিয়ে আলাদা করুন)">
+      </div>
+      <div class="row" style="margin-top:9px">
+        <input id="co" placeholder="দীর্ঘস্থায়ী রোগ (কমা দিয়ে আলাদা করুন)">
+        <input id="nt" placeholder="জরুরি নোট">
+      </div>
+      <button class="btn" id="savep" style="width:100%;margin-top:11px">সংরক্ষণ করুন</button>
+      <div id="pmsg" style="margin-top:8px"></div>
+    </div>
+  </div></div>
+
+  <div class="sec"><span>০৩</span><b>বিশ্বস্ত যোগাযোগ</b></div>
+  <div class="sheet"><div class="sheet-b">
+    <div id="clist"></div>
+    <button class="btn o" id="addc" style="width:100%;margin-top:10px">＋ যোগাযোগ যোগ করুন</button>
+    <div id="cmsg" style="margin-top:8px"></div>
+  </div></div>
+
+  <div class="sec"><span>০৪</span><b>নিকটস্থ হাসপাতাল</b></div>
+  <div class="sheet"><div class="sheet-b" id="hosp"></div></div>
+
+  <div class="sec"><span>০৫</span><b>আগের জরুরি ঘটনা</b></div>
+  <div class="sheet"><div class="sheet-b" id="hist"></div></div>
+
+  <div class="note danger" style="margin:24px 0">
+    <b>গুরুত্বপূর্ণ কথা</b>
+    এই অ্যাপ কোনো অ্যাম্বুলেন্স পাঠায়নি এবং ইমার্জেন্সি ডিপার্টমেন্ট খোলা আছে কি না তা জানায় না। এটি শুধু আপনাকে দ্রুত কল করতে ও পরিবারকে জানাতে সাহায্য করে। জরুরি অবস্থায় প্রথমে ৯৯৯ এ কল করুন।
+  </div>
+</main>
+
+<dialog id="confirmd"><h3 style="margin-top:0">জরুরি সহায়তা চালু করবেন?</h3>
+  <p class="mu">চাপলে আপনার অবস্থান নিয়ে আপনার যোগাযোগগুলোকে জানানোর প্রস্তুতি হবে। অ্যাম্বুলেন্স পাঠানো হবে না।</p>
+  <div class="row"><button class="btn o" id="cno">না</button><button class="btn" id="yes" style="flex:1">হ্যাঁ, চালু করুন</button></div></dialog>
+
+<dialog id="cdlg"><form method="dialog" id="cform"><h3 style="margin-top:0" id="cformtitle">যোগাযোগ যোগ করুন</h3>
+  <div class="kv" style="gap:9px">
+    <input name="name" placeholder="নাম *" required>
+    <div class="row"><input name="relationship" placeholder="সম্পর্ক (যেমন: স্ত্রী)"><input name="phone" placeholder="মোবাইল নম্বর *" required></div>
+  </div>
+  <div id="cerr" style="margin-top:8px"></div>
+  <div class="row" style="margin-top:14px"><button class="btn o" type="button" id="ccancel">বাতিল</button><button class="btn" type="submit" style="flex:1" id="csubmit">যোগ করুন</button></div></form></dialog>
+
+<script src="js/app.js"></script><script src="js/health.js"></script><script>
+const {esc,api,bnDateTime,loading,empty,errorNote,gate}=H;
+let NUMBERS={emergency:'999',ambulance:'999',fire:'999',police:'999'},CONTACTS=[],EVENT=null;
+
+/* The contact being edited, or null when a new one is being added. */
+let EDIT_CONTACT=null;
+
+function list(value){return String(value||'').split(',').map(s=>s.trim()).filter(Boolean)}
+
+/* ---------------------------------------------------------- activation --- */
+$('#sos').onclick=()=>confirmd.showModal();
+$('#yes').onclick=()=>{confirmd.close();activate()};
+$('#cno').onclick=()=>confirmd.close();
+
+function currentPosition(){
+  return new Promise(resolve=>{
+    if(!navigator.geolocation){resolve(null);return}
+    const timer=setTimeout(()=>resolve(null),5000);
+    navigator.geolocation.getCurrentPosition(
+      pos=>{clearTimeout(timer);resolve({lat:pos.coords.latitude,lng:pos.coords.longitude})},
+      ()=>{clearTimeout(timer);resolve(null)},
+      {enableHighAccuracy:true,timeout:4500,maximumAge:60000}
+    );
+  });
+}
+
+async function activate(){
+  const box=$('#activated');
+  box.hidden=false;
+  box.innerHTML=`<div class="sheet"><div class="sheet-b"><div class="note danger"><b>এক্ষুনি করুন</b><div id="actnums"></div></div><div id="actbody"></div></div></div>`;
+  $('#actnums').innerHTML=`ইমার্জেন্সি: <b class="fig">${esc(NUMBERS.emergency)}</b> · অ্যাম্বুলেন্স: <b class="fig">${esc(NUMBERS.ambulance)}</b>`;
+
+  // The location request never blocks the call buttons.
+  const location=await currentPosition();
+
+  try{
+    const data=await api('POST','/api/emergency/activate',{
+      location,locationSource:location?'device':null,eventType:'sos'
+    });
+    EVENT=data.event;NUMBERS=data.numbers;
+    renderActivation(data);
+    loadHistory();
+  }catch(error){
+    $('#actbody').innerHTML=`<div class="note warn"><b>ইভেন্টটি সংরক্ষণ করা যায়নি</b>${esc(error.message)} — নিচের কল বাটনগুলো এখনো কাজ করছে।</div>`+callButtons(CONTACTS,location);
+  }
+}
+
+function callButtons(contacts,location){
+  const share=location?`https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}`:'';
+  return `
+  <div style="margin-top:12px;display:grid;gap:8px">
+    <a class="call" href="tel:${esc(NUMBERS.emergency)}"><span class="ic">✚</span>জরুরি সেবা<b>${esc(NUMBERS.emergency)}</b></a>
+    ${contacts.map(c=>`<a class="call" href="tel:${esc(c.phone)}"><span class="ic">☎</span>${esc(c.name)}<small class="mu">${esc(c.relationship||'')}</small><b>${esc(c.phone)}</b></a>`).join('')}
+    ${share?`<a class="call" href="${share}" target="_blank" rel="noopener"><span class="ic">⌖</span>আমার অবস্থান মানচিত্রে দেখুন</a>`:''}
+  </div>`;
+}
+
+function renderActivation(data){
+  const share=data.shareUrl;
+  const wa=CONTACTS.length&&share
+    ?`https://wa.me/?text=${encodeURIComponent(`🚨 জরুরি সহায়তা দরকার। আমার অবস্থান: ${share}`)}`:'';
+  $('#actbody').innerHTML=`
+    <p class="mu" style="margin:12px 0 0">${esc(data.disclaimer||'')}</p>
+    ${callButtons(CONTACTS,data.event.location)}
+    ${wa?`<a class="btn" href="${wa}" target="_blank" rel="noopener" style="width:100%;margin-top:10px;display:block;text-align:center">হোয়াটসঅ্যাপে পাঠান</a>`:''}
+    <div style="margin-top:12px">
+      <textarea id="emsg" rows="3" style="width:100%" readonly>${esc(data.message||'')}</textarea>
+      <button class="btn o" id="copy" style="width:100%;margin-top:7px">বার্তাটি কপি করুন</button>
+    </div>
+    ${CONTACTS.length?'<button class="btn" id="notify" style="width:100%;margin-top:12px">যোগাযোগগুলোকে জানান</button>':''}
+    <div id="nout" style="margin-top:8px"></div>
+    <button class="btn o" id="resolve" style="width:100%;margin-top:8px">আমি নিরাপদ, ঘটনাটি বন্ধ করুন</button>`;
+
+  const copy=$('#copy');
+  if(copy)copy.onclick=async()=>{
+    const text=$('#emsg').value;
+    try{await navigator.clipboard.writeText(text);toast('কপি হয়েছে')}catch(e){$('#emsg').select();toast('টেক্সটটি সিলেক্ট করা হয়েছে — কপি করুন')}
+  };
+
+  const notify=$('#notify');
+  if(notify)notify.onclick=async()=>{
+    notify.disabled=true;
+    $('#nout').innerHTML=loading('যোগাযোগ জানানো হচ্ছে…');
+    try{
+      const data2=await api('POST','/api/emergency/'+data.event.id+'/notify',{channelAvailable:true});
+      $('#nout').innerHTML=(data2.note?`<div class="note warn">${esc(data2.note)}</div>`:'')+data2.notifications.map(n=>
+        `<div class="row" style="padding:7px 0;border-bottom:1px dashed var(--ln)"><span>${esc(n.contactName||'')}</span>
+        <span class="pill ${n.status==='sent'?'g':n.status==='failed'?'r':'a'}" style="margin-left:auto">${n.status==='sent'?'পাঠানো হয়েছে':n.status==='failed'?'পাঠানো যায়নি':n.status==='pending'?'প্রস্তুত':'অপ্রাপ্য'}</span></div>`).join('');
+    }catch(error){$('#nout').innerHTML=errorNote(error.message);notify.disabled=false}
+  };
+
+  const resolve=$('#resolve');
+  if(resolve)resolve.onclick=async()=>{
+    try{await api('POST','/api/emergency/'+data.event.id+'/resolve',{});toast('ঘটনাটি বন্ধ করা হয়েছে');$('#activated').hidden=true;loadHistory()}
+    catch(error){toast(error.message)}
+  };
+}
+
+/* ------------------------------------------------------------ profile ---- */
+function renderProfile(profile){
+  $('#pbody').hidden=false;
+  if(profile){
+    $('#bg').value=profile.bloodGroup||'';
+    $('#al').value=(profile.allergies||[]).join(', ');
+    $('#co').value=(profile.conditions||[]).join(', ');
+    $('#nt').value=profile.emergencyNotes||'';
+  }
+}
+
+$('#savep').onclick=async()=>{
+  $('#pmsg').innerHTML='';
+  try{
+    const data=await api('PUT','/api/emergency/profile',{
+      bloodGroup:$('#bg').value||null,
+      allergies:list($('#al').value),
+      conditions:list($('#co').value),
+      emergencyNotes:$('#nt').value.trim()||null
+    });
+    renderProfile(data.profile);toast('প্রোফাইল সংরক্ষণ হয়েছে');
+  }catch(error){$('#pmsg').innerHTML=errorNote(error.message)}
+};
+
+/* ----------------------------------------------------------- contacts ---- */
+function renderContacts(){
+  const box=$('#clist');
+  if(!CONTACTS.length){box.innerHTML=empty('কোনো যোগাযোগ যোগ করা হয়নি','নিচে থেকে পরিবারের সদস্যের নম্বর যোগ করুন','◷');return}
+  box.innerHTML=CONTACTS.map(c=>`<div class="row" style="padding:10px 0;border-bottom:1px dashed var(--ln);align-items:center;gap:9px">
+    <div><b>${esc(c.name)}</b><div class="mu" style="font-size:12.5px">${esc(c.relationship||'')} · <span class="fig">${esc(c.phone)}</span></div></div>
+    <a class="btn" href="tel:${esc(c.phone)}" style="margin-left:auto;padding:6px 12px;font-size:13px">কল</a>
+    <button class="btn o" data-editc="${c.id}" style="padding:6px 10px;font-size:13px">✎</button>
+    <button class="btn o" data-delc="${c.id}" style="padding:6px 10px;font-size:13px">✕</button></div>`).join('');
+  box.querySelectorAll('[data-delc]').forEach(b=>b.onclick=async()=>{
+    if(!confirm('এই যোগাযোগটি মুছে ফেলবেন?'))return;
+    try{await api('DELETE','/api/emergency/contacts/'+b.dataset.delc);await loadContacts()}catch(error){toast(error.message)}
+  });
+  box.querySelectorAll('[data-editc]').forEach(b=>b.onclick=()=>openContact(Number(b.dataset.editc)));
+}
+
+/* Open the contact dialog - for a new contact, or for editing one. */
+function openContact(id){
+  const c=id?CONTACTS.find(x=>x.id===id):null;
+  EDIT_CONTACT=c;
+  const f=$('#cform');
+  f.reset();
+  $('#cerr').innerHTML='';
+  $('#cformtitle').textContent=c?'যোগাযোগ সম্পাদনা করুন':'যোগাযোগ যোগ করুন';
+  $('#csubmit').textContent=c?'সংরক্ষণ করুন':'যোগ করুন';
+  if(c){
+    f.name.value=c.name||'';
+    f.relationship.value=c.relationship||'';
+    f.phone.value=c.phone||'';
+  }
+  cdlg.showModal();
+}
+
+$('#addc').onclick=()=>openContact(null);
+$('#ccancel').onclick=()=>cdlg.close();
+
+$('#cform').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const f=e.target;
+  const payload={
+    name:f.name.value.trim(),
+    relationship:f.relationship.value.trim()||null,
+    phone:f.phone.value.trim(),
+  };
+  try{
+    if(EDIT_CONTACT){
+      await api('PUT','/api/emergency/contacts/'+EDIT_CONTACT.id,payload);
+      toast('যোগাযোগ সংরক্ষণ হয়েছে');
+    }else{
+      await api('POST','/api/emergency/contacts',{...payload,isPrimary:CONTACTS.length===0});
+      toast('যোগাযোগ যোগ হয়েছে');
+    }
+    EDIT_CONTACT=null;
+    cdlg.close();f.reset();await loadContacts();
+  }catch(error){$('#cerr').innerHTML=errorNote(error.message)}
+});
+
+/* ---------------------------------------------------------- hospitals ---- */
+const MAPS_HOSPITAL='https://www.google.com/maps/search/?api=1&query=nearest%20hospital%20emergency';
+
+async function loadHospitals(){
+  const box=$('#hosp');
+  box.innerHTML=loading('হাসপাতাল খোঁজা হচ্ছে…');
+  const position=await currentPosition();
+  if(!position){
+    box.innerHTML=`<div class="note warn">অবস্থান পাওয়া যায়নি।</div>
+      <a class="btn o" style="width:100%;margin-top:10px" href="${MAPS_HOSPITAL}" target="_blank" rel="noopener">মানচিত্রে হাসপাতাল খুঁজুন</a>`;
+    return;
+  }
+  /*
+   * The hospital list needs an account. A guest is not shown a raw 401 -
+   * they get the map link, which works without one.
+   */
+  if(!H.isSignedIn()){
+    box.innerHTML=`<div class="note">হাসপাতালের তালিকা দেখতে অ্যাকাউন্ট দরকার।</div>
+      <a class="btn o" style="width:100%;margin-top:10px" href="${MAPS_HOSPITAL}" target="_blank" rel="noopener">মানচিত্রে হাসপাতাল খুঁজুন</a>`;
+    return;
+  }
+  try{
+    const data=await api('GET','/api/emergency/hospitals?lat='+position.lat+'&lng='+position.lng);
+    if(!data.hospitals.length){
+      box.innerHTML=`<div class="note warn">${esc(data.note||'হাসপাতালের তালিকা পাওয়া যায়নি।')}</div>
+        <a class="btn o" style="width:100%;margin-top:10px" href="${esc(data.fallbackUrl||MAPS_HOSPITAL)}" target="_blank" rel="noopener">মানচিত্রে হাসপাতাল খুঁজুন</a>`;return}
+    box.innerHTML=`<p class="mu" style="margin:0 0 10px;font-size:12.5px">${esc(data.source||'')} — ${esc(data.availabilityNote||'')}</p>`+
+      data.hospitals.map(h=>`<div class="row" style="padding:11px 0;border-bottom:1px dashed var(--ln);align-items:flex-start;gap:10px">
+        <div style="flex:1"><b>${esc(h.name)}</b>
+        <div class="mu" style="font-size:12.5px">${h.distanceMeters?Math.round(h.distanceMeters/100)/10+' কিমি দূরে':'—'}${h.address?' · '+esc(h.address):''}</div>
+        ${h.emergency?'<span class="pill g">জরুরি বিভাগ আছে (OSM)</span>':''}</div>
+        ${h.phone?`<a class="btn" href="tel:${esc(h.phone)}" style="padding:6px 12px;font-size:13px">কল</a>`:''}
+        <a class="btn o" href="${esc(h.mapsUrl)}" target="_blank" rel="noopener" style="padding:6px 12px;font-size:13px">মানচিত্র</a>
+      </div>`).join('');
+  }catch(error){
+    box.innerHTML=`<div class="note warn">${esc(error.message)}</div>
+      <a class="btn o" style="width:100%;margin-top:10px" href="${MAPS_HOSPITAL}" target="_blank" rel="noopener">মানচিত্রে হাসপাতাল খুঁজুন</a>`;
+  }
+}
+
+/* ------------------------------------------------------------ history ---- */
+async function loadHistory(){
+  const box=$('#hist');
+  try{
+    const data=await api('GET','/api/emergency/history');
+    if(!data.events.length){box.innerHTML=empty('কোনো জরুরি ঘটনা নেই','আপনার ঘটনার ইতিহাস এখানে দেখা যাবে','◷');return}
+    box.innerHTML=data.events.map(e=>`<div class="row" style="padding:10px 0;border-bottom:1px dashed var(--ln);align-items:center;gap:9px">
+      <div><b>${esc(bnDateTime(e.createdAt))}</b>
+      <div class="mu" style="font-size:12.5px">${e.location?'অবস্থান সংযুক্ত':'অবস্থান ছিল না'}${e.notes?' · '+esc(e.notes):''}</div></div>
+      <span class="pill ${e.status==='resolved'?'g':'r'}" style="margin-left:auto">${e.status==='resolved'?'সমাধান হয়েছে':'চলমান'}</span></div>`).join('');
+  }catch(error){box.innerHTML=errorNote(error.message)}
+}
+
+/* --------------------------------------------------------------- boot ---- */
+async function loadContacts(){
+  const data=await api('GET','/api/emergency/contacts');
+  CONTACTS=data.contacts;renderContacts();
+}
+
+H.ready(async()=>{
+  // The call buttons work with or without an account.
+  const data=await api('GET','/api/emergency/profile').catch(()=>null);
+  if(data){NUMBERS=data.numbers||NUMBERS}
+
+  if(!H.isSignedIn()){
+    gate($('#gate'),{title:'অ্যাকাউন্ট লাগবে',hint:'প্রোফাইল ও যোগাযোগ সংরক্ষণ করতে অ্যাকাউন্ট দরকার। তবে উপরের কল বাটনগুলো এখনই কাজ করছে।',onSignedIn:()=>location.reload()});
+    loadHospitals();
+    return;
+  }
+  try{
+    renderProfile(data&&data.profile);
+    await loadContacts();
+    await loadHistory();
+  }catch(error){toast(error.message)}
+  loadHospitals();
+});
+</script></body></html>
