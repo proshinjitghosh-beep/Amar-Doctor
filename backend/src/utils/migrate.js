@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { pool } from '../config/database.js';
 
@@ -10,14 +11,73 @@ if (!pool) {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDir = path.resolve(here, '../../../database/migrations');
-const files = (await fs.readdir(migrationsDir)).filter((file) => file.endsWith('.sql')).sort();
+
+const LEDGER = `
+  CREATE TABLE IF NOT EXISTS schema_migrations (
+    filename TEXT PRIMARY KEY,
+    checksum TEXT NOT NULL,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )
+`;
+
+function checksum(sql) {
+  return crypto.createHash('sha256').update(sql).digest('hex').slice(0, 16);
+}
+
+// A migration that changed after it was applied is a mistake, not something to
+// silently re-run. Flag it so the developer can write a new numbered file.
+function assertUnchanged(filename, sql, applied) {
+  const current = checksum(sql);
+  if (applied.checksum !== current) {
+    throw new Error(
+      `Migration ${filename} changed after it was applied (recorded ${applied.checksum}, now ${current}).\n` +
+        'Add a new numbered migration file instead of editing an applied one.'
+    );
+  }
+}
 
 try {
+  await pool.query(LEDGER);
+
+  const files = (await fs.readdir(migrationsDir))
+    .filter((file) => file.endsWith('.sql'))
+    .sort();
+
+  const { rows } = await pool.query('SELECT filename, checksum FROM schema_migrations');
+  const applied = new Map(rows.map((row) => [row.filename, row]));
+
+  let count = 0;
+
   for (const file of files) {
     const sql = await fs.readFile(path.join(migrationsDir, file), 'utf8');
-    await pool.query(sql);
-    console.log(`Applied ${file}`);
+    const previous = applied.get(file);
+
+    if (previous) {
+      assertUnchanged(file, sql, previous);
+      console.log(`Skipped ${file} (already applied)`);
+      continue;
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(sql);
+      await client.query(
+        'INSERT INTO schema_migrations (filename, checksum) VALUES ($1, $2)',
+        [file, checksum(sql)]
+      );
+      await client.query('COMMIT');
+      console.log(`Applied ${file}`);
+      count += 1;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
+
+  console.log(count ? `${count} migration(s) applied.` : 'Database is up to date.');
 } finally {
   await pool.end();
 }

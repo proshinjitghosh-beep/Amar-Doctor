@@ -8,6 +8,15 @@ import { env } from './config/env.js';
 import chatRoutes from './routes/chat.routes.js';
 import healthRoutes from './routes/health.routes.js';
 import signalingRoutes from './routes/signaling.routes.js';
+import authRoutes from './routes/auth.routes.js';
+import healthProfileRoutes from './routes/health-profile.routes.js';
+import reportsRoutes from './routes/reports.routes.js';
+import medicationRoutes, { reminderRouter } from './routes/medications.routes.js';
+import emergencyRoutes from './routes/emergency.routes.js';
+import doctorPrepRoutes, { sharedRouter } from './routes/doctor-prep.routes.js';
+import appointmentRoutes from './routes/appointments.routes.js';
+import notificationRoutes from './routes/notifications.routes.js';
+import internalRoutes from './routes/internal.routes.js';
 import { errorHandler } from './middleware/error-handler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -26,11 +35,28 @@ app.use(express.json({ limit: '32kb' }));
 
 const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false });
 const chatLimiter = rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false });
+const uploadLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: 'draft-7', legacyHeaders: false });
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false });
 
 app.use('/api', apiLimiter);
 app.use('/api/health', healthRoutes);
 app.use('/api/chat', chatLimiter, chatRoutes);
 app.use('/api/sig', signalingRoutes);
+
+// Healthcare modules. These routers must be mounted before the /api 404
+// catch-all below, otherwise they would never be reached.
+app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/health-profile', healthProfileRoutes);
+app.use('/api/reports', uploadLimiter, reportsRoutes);
+app.use('/api/medications', medicationRoutes);
+app.use('/api/reminders', reminderRouter);
+app.use('/api/emergency', emergencyRoutes);
+app.use('/api/doctor-prep', doctorPrepRoutes);
+app.use('/api/shared', sharedRouter);
+app.use('/api/appointments', appointmentRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/internal', internalRoutes);
+
 app.use(express.static(publicDir));
 
 app.get('/', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));

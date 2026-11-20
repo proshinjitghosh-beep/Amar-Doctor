@@ -4,9 +4,10 @@ import { pool } from './config/database.js';
 
 const server = app.listen(env.port, () => {
   console.log(`Sheba running at http://localhost:${env.port}`);
-  console.log(`AI model: ${env.geminiModel}`);
-  console.log(`Gemini API: ${env.geminiApiKey ? 'configured' : 'not configured'}`);
-  console.log(`PostgreSQL: ${pool ? 'configured' : 'not configured (schema is optional for current demo)'}`);
+  console.log(`AI model: ${env.groqModel}`);
+  console.log(`Groq API: ${env.groqApiKey ? 'configured' : 'not configured'}`);
+  console.log(`Groq vision (OCR): ${env.groqVisionModel || 'not configured (image reports need manual entry)'}`);
+  console.log(`PostgreSQL: ${pool ? 'configured' : 'not configured (chat works; health modules need DATABASE_URL)'}`);
 });
 
 async function shutdown(signal) {
